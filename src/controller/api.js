@@ -3,10 +3,10 @@ import { generateForecast, createForecastCard, calculateMAE } from '../model/for
 import { forecastStore } from '../model/store.js';
 
 export function handleGetSeries(req, res) {
-  const { symbol = 'BTC', from, to, fields } = req.query;
+  const { symbol = 'BTC', interval = '1d', from, to, fields } = req.query;
   
   try {
-    const series = seriesModel.getSeries(symbol, from, to, fields);
+    const series = seriesModel.getSeries(symbol, interval, from, to, fields);
     
     const format = req.query.format || 'json';
     
@@ -23,11 +23,12 @@ export function handleGetSeries(req, res) {
       ].join('\n');
       
       res.setHeader('Content-Type', 'text/csv');
-      res.setHeader('Content-Disposition', `attachment; filename="${symbol}_series.csv"`);
+      res.setHeader('Content-Disposition', `attachment; filename="${symbol}_${interval}_series.csv"`);
       res.send(csv);
     } else {
       res.json({
         symbol,
+        interval,
         count: series.length,
         data: series
       });
@@ -38,16 +39,29 @@ export function handleGetSeries(req, res) {
 }
 
 export function handleGetIndicators(req, res) {
-  const { symbol = 'BTC' } = req.query;
+  const { symbol = 'BTC', interval = '1d' } = req.query;
   
   try {
-    const indicators = seriesModel.getIndicators(symbol);
+    const indicators = seriesModel.getIndicators(symbol, interval);
     
     res.json({
       symbol,
+      interval,
       count: indicators.length,
       data: indicators.slice(-90)
     });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+}
+
+export function handleGetSignals(req, res) {
+  const { symbol = 'BTC' } = req.query;
+  
+  try {
+    const signals = seriesModel.getSignals(symbol);
+    
+    res.json(signals);
   } catch (error) {
     res.status(500).json({ error: error.message });
   }

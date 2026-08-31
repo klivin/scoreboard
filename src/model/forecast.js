@@ -112,6 +112,22 @@ export function createForecastCard(symbol, data, horizonDays) {
     ? `High volatility ${forecast.metadata.volatility.toFixed(2)}% may reverse gains. Resistance overhead.`
     : `Oversold conditions may trigger bounce. Support levels nearby.`;
   
+  const modelError = Math.abs(forecast.prediction - lastPrice);
+  const naiveError = Math.abs(naive.prediction - lastPrice);
+  
+  let maeComparison = 'Preliminary forecast - backtest needed for MAE comparison.';
+  if (data.length > horizonDays) {
+    const historicalActual = data[data.length - horizonDays - 1].close;
+    const modelHistError = Math.abs(forecast.prediction - historicalActual);
+    const naiveHistError = Math.abs(naive.prediction - historicalActual);
+    
+    if (naiveHistError < modelHistError) {
+      maeComparison = 'Naive baseline wins on recent MAE. Consider using naive.';
+    } else {
+      maeComparison = 'Trend model shows lower MAE than naive on recent data.';
+    }
+  }
+  
   return {
     symbol,
     horizonDays,
@@ -125,6 +141,7 @@ export function createForecastCard(symbol, data, horizonDays) {
     proCase,
     conCase,
     recommendation: Math.abs(changePercent) > 3 ? side : 'NEUTRAL',
+    mae_comparison: maeComparison,
     timestamp: forecast.timestamp
   };
 }

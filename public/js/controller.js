@@ -2,12 +2,13 @@ export class AppController {
   constructor(views) {
     this.views = views;
     this.currentSymbol = 'BTC';
+    this.currentInterval = '1d';
     this.currentHorizon = 7;
   }
 
-  async loadData(symbol) {
+  async loadData(symbol, interval = '1d') {
     try {
-      const response = await fetch(`/api/indicators?symbol=${symbol}`);
+      const response = await fetch(`/api/indicators?symbol=${symbol}&interval=${interval}`);
       if (!response.ok) throw new Error('Failed to load data');
       
       const result = await response.json();
@@ -15,6 +16,16 @@ export class AppController {
     } catch (error) {
       console.error('Error loading data:', error);
       throw error;
+    }
+  }
+
+  async downloadCSV(symbol, interval = '1d') {
+    try {
+      const url = `/api/series?symbol=${symbol}&interval=${interval}&format=csv`;
+      window.open(url, '_blank');
+    } catch (error) {
+      console.error('Error downloading CSV:', error);
+      alert('Failed to download CSV');
     }
   }
 
@@ -70,15 +81,32 @@ export class AppController {
     }
   }
 
-  async updateOverview(symbol) {
+  async updateOverview(symbol, interval = '1d') {
     this.currentSymbol = symbol;
+    this.currentInterval = interval;
     
-    const data = await this.loadData(symbol);
+    const data = await this.loadData(symbol, interval);
     
     this.views.chart.setData(data);
     this.views.chart.render();
     
     this.views.stats.render(data);
+    
+    if (this.views.signals) {
+      await this.updateSignals(symbol);
+    }
+  }
+
+  async updateSignals(symbol) {
+    try {
+      const response = await fetch(`/api/signals?symbol=${symbol}`);
+      if (!response.ok) return;
+      
+      const signals = await response.json();
+      this.views.signals.render(signals);
+    } catch (error) {
+      console.error('Error loading signals:', error);
+    }
   }
 
   async updateForecasts() {
@@ -99,17 +127,24 @@ export class AppController {
 
   setupEventListeners() {
     document.getElementById('load-btn').addEventListener('click', async () => {
-      const symbol = document.getElementById('symbol-input').value.trim() || 'BTC';
-      await this.updateOverview(symbol);
+      const symbol = document.getElementById('symbol-select').value || 'BTC';
+      const interval = document.getElementById('interval-select').value || '1d';
+      await this.updateOverview(symbol, interval);
+    });
+
+    document.getElementById('download-csv-btn').addEventListener('click', async () => {
+      const symbol = document.getElementById('symbol-select').value || 'BTC';
+      const interval = document.getElementById('interval-select').value || '1d';
+      await this.downloadCSV(symbol, interval);
     });
 
     document.getElementById('generate-forecast-btn').addEventListener('click', async () => {
-      const symbol = document.getElementById('symbol-input').value.trim() || 'BTC';
+      const symbol = document.getElementById('symbol-select').value || 'BTC';
       const horizon = parseInt(document.getElementById('horizon-select').value, 10);
       await this.handleGenerateForecast(symbol, horizon);
     });
 
-    ['toggle-ma20', 'toggle-ma50', 'toggle-ma100', 'toggle-ma200', 'toggle-ichimoku', 'toggle-volume'].forEach(id => {
+    ['toggle-ma20', 'toggle-ma50', 'toggle-ma100', 'toggle-ma200', 'toggle-ichimoku', 'toggle-volume', 'toggle-naive'].forEach(id => {
       const checkbox = document.getElementById(id);
       if (checkbox) {
         checkbox.addEventListener('change', () => {

@@ -7,7 +7,8 @@ import {
   handleGetForecast,
   handleGetMissing,
   handleGetUniverse,
-  handleGetForecasts
+  handleGetForecasts,
+  handleGetSignals
 } from './controller/api.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -25,6 +26,7 @@ app.get('/api/forecast', handleGetForecast);
 app.get('/api/missing', handleGetMissing);
 app.get('/api/universe', handleGetUniverse);
 app.get('/api/forecasts', handleGetForecasts);
+app.get('/api/signals', handleGetSignals);
 
 app.get('/health', (req, res) => {
   res.json({ status: 'ok', timestamp: Date.now() });

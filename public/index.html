@@ -25,9 +25,20 @@
       <div class="controls">
         <label>
           Symbol:
-          <input type="text" id="symbol-input" value="BTC" />
+          <select id="symbol-select">
+            <option value="BTC">BTC</option>
+            <option value="ETH">ETH</option>
+          </select>
+        </label>
+        <label>
+          Interval:
+          <select id="interval-select">
+            <option value="1h">1 Hour</option>
+            <option value="1d" selected>1 Day</option>
+          </select>
         </label>
         <button id="load-btn">Load Data</button>
+        <button id="download-csv-btn">Download CSV</button>
       </div>
 
       <div id="chart-container">
@@ -38,9 +49,15 @@
           <label><input type="checkbox" id="toggle-ma100"> MA100 (SMA)</label>
           <label><input type="checkbox" id="toggle-ma200"> MA200 (SMA)</label>
           <label><input type="checkbox" id="toggle-ichimoku"> Ichimoku</label>
-          <label><input type="checkbox" id="toggle-volume"> Volume</label>
+          <label><input type="checkbox" id="toggle-volume" checked> Volume</label>
+          <label><input type="checkbox" id="toggle-naive" checked> Naive Baseline</label>
         </div>
         <canvas id="chart"></canvas>
+      </div>
+
+      <div id="signals-container">
+        <h2>Market Signals</h2>
+        <div id="signals-grid" class="stats-grid"></div>
       </div>
 
       <div id="stats-container" class="stats-grid"></div>

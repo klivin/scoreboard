@@ -13,7 +13,7 @@ export class SeriesModel {
     return this.data;
   }
   
-  getSeries(symbol, from = null, to = null, fields = null) {
+  getSeries(symbol, interval = '1d', from = null, to = null, fields = null) {
     if (!this.data) {
       this.load();
     }
@@ -21,8 +21,20 @@ export class SeriesModel {
     let series = null;
     
     if (symbol === 'BTC' || symbol === 'BTCUSDT') {
+      const key = interval === '1h' ? 'oi_1h' : 'oi_1d';
+      series = this.data[key].data;
+      
+      if (series.length === 0 && this.data[key].missing) {
+        const candleKey = interval === '1h' ? 'candles_1h' : 'candles_1d';
+        series = this.data[candleKey].data;
+        
+        if (series.length === 0) {
+          series = getFixtureData('candles');
+        }
+      }
+    } else if (symbol === 'ETH') {
       series = this.data.candles_1d.data;
-      if (series.length === 0 && this.data.candles_1d.missing) {
+      if (series.length === 0) {
         series = getFixtureData('candles');
       }
     }
@@ -30,7 +42,7 @@ export class SeriesModel {
     if (!series || series.length === 0) {
       return [];
     }
-    
+
     let filtered = series;
     
     if (from) {
@@ -65,11 +77,47 @@ export class SeriesModel {
     return filtered;
   }
   
-  getIndicators(symbol) {
-    const series = this.getSeries(symbol);
+  getIndicators(symbol, interval = '1d') {
+    const series = this.getSeries(symbol, interval);
     if (series.length === 0) return [];
     
     return addIndicators(series);
+  }
+  
+  getSignals(symbol) {
+    if (!this.data) {
+      this.load();
+    }
+    
+    const signals = {};
+    
+    if (this.data.etf_btc && this.data.etf_btc.data.length > 0) {
+      const recent = this.data.etf_btc.data.slice(-7);
+      const totalFlow = recent.reduce((sum, row) => sum + (row.net_flow || 0), 0);
+      signals.etf = {
+        net_flow: totalFlow,
+        days: recent.length
+      };
+    }
+    
+    if (this.data.oi_1d && this.data.oi_1d.data.length > 0) {
+      const latest = this.data.oi_1d.data[this.data.oi_1d.data.length - 1];
+      const weekAgo = this.data.oi_1d.data[Math.max(0, this.data.oi_1d.data.length - 8)];
+      signals.oi = {
+        current: latest.oi || latest.open_interest || 0,
+        change: weekAgo && weekAgo.oi ? ((latest.oi - weekAgo.oi) / weekAgo.oi * 100) : 0
+      };
+    }
+    
+    if (this.data.ratios && this.data.ratios.data.length > 0) {
+      const latest = this.data.ratios.data[this.data.ratios.data.length - 1];
+      signals.alt_btc = {
+        ratio: latest.alt_btc_ratio || 0,
+        trend: latest.trend || 'neutral'
+      };
+    }
+    
+    return signals;
   }
   
   getMissingFiles() {
