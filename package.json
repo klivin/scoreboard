@@ -1,0 +1,22 @@
+{
+  "name": "scoreboard",
+  "version": "1.0.0",
+  "description": "Crypto market analysis and forecasting dashboard",
+  "main": "src/server.js",
+  "type": "module",
+  "scripts": {
+    "start": "node src/server.js",
+    "test": "node --test src/**/*.test.js",
+    "dev": "node --watch src/server.js"
+  },
+  "keywords": ["crypto", "forecasting", "analysis"],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "express": "^4.18.2"
+  },
+  "devDependencies": {},
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

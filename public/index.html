@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Scoreboard - Crypto Analysis & Forecasting</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>Scoreboard</h1>
+      <p class="subtitle">Crypto Market Analysis & Forecasting Dashboard</p>
+    </header>
+
+    <div id="missing-alert" class="alert hidden"></div>
+
+    <nav class="tabs">
+      <button class="tab-btn active" data-tab="overview">Overview</button>
+      <button class="tab-btn" data-tab="forecast">Forecasts</button>
+      <button class="tab-btn" data-tab="universe">Universe</button>
+    </nav>
+
+    <div id="overview" class="tab-content active">
+      <div class="controls">
+        <label>
+          Symbol:
+          <input type="text" id="symbol-input" value="BTC" />
+        </label>
+        <button id="load-btn">Load Data</button>
+      </div>
+
+      <div id="chart-container">
+        <h2>Price Chart</h2>
+        <div class="chart-controls">
+          <label><input type="checkbox" id="toggle-ma20" checked> MA20 (EMA)</label>
+          <label><input type="checkbox" id="toggle-ma50" checked> MA50 (SMA)</label>
+          <label><input type="checkbox" id="toggle-ma100"> MA100 (SMA)</label>
+          <label><input type="checkbox" id="toggle-ma200"> MA200 (SMA)</label>
+          <label><input type="checkbox" id="toggle-ichimoku"> Ichimoku</label>
+          <label><input type="checkbox" id="toggle-volume"> Volume</label>
+        </div>
+        <canvas id="chart"></canvas>
+      </div>
+
+      <div id="stats-container" class="stats-grid"></div>
+    </div>
+
+    <div id="forecast" class="tab-content">
+      <div class="forecast-controls">
+        <label>
+          Horizon (days):
+          <select id="horizon-select">
+            <option value="1">1 Day</option>
+            <option value="7" selected>7 Days</option>
+            <option value="30">30 Days</option>
+          </select>
+        </label>
+        <button id="generate-forecast-btn">Generate Forecast</button>
+      </div>
+
+      <div id="forecast-cards" class="forecast-grid"></div>
+    </div>
+
+    <div id="universe" class="tab-content">
+      <div id="universe-info"></div>
+      <div id="universe-list" class="universe-grid"></div>
+    </div>
+  </div>
+
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>
