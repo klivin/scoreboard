@@ -2,6 +2,11 @@
 
 Crypto market analysis and forecasting dashboard built with vanilla JavaScript MVC architecture.
 
+## Documentation
+
+- **[📖 Wiki](docs/WIKI.md)** - Complete product documentation, architecture, data sources, and troubleshooting
+- **[📋 Feature Requests](docs/FEATURE_REQUESTS.md)** - Status tracker for all features (open/doing/done)
+
 ## Features
 
 - **Real-time Price Charts**: Interactive candlestick charts with technical indicators
