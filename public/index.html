@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Scoreboard - Crypto Market Analysis</title>
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+  <header>
+    <h1>Scoreboard</h1>
+    <p class="tagline">Crypto Market Analysis & Forecasting</p>
+  </header>
+
+  <main>
+    <section id="controls">
+      <div class="control-group">
+        <label for="symbol-select">Symbol:</label>
+        <select id="symbol-select">
+          <option value="BTC">BTC</option>
+          <option value="ETH">ETH</option>
+        </select>
+      </div>
+      
+      <div class="control-group">
+        <label for="interval-select">Interval:</label>
+        <select id="interval-select">
+          <option value="1h">1 Hour</option>
+          <option value="1d" selected>1 Day</option>
+        </select>
+      </div>
+      
+      <button id="refresh-btn">Refresh Data</button>
+    </section>
+
+    <section id="chart-container">
+      <h2>Price Chart</h2>
+      <canvas id="price-chart"></canvas>
+      
+      <div id="indicator-toggles">
+        <h3>Indicators</h3>
+        <label><input type="checkbox" id="toggle-ema20" checked> EMA 20</label>
+        <label><input type="checkbox" id="toggle-sma20"> SMA 20</label>
+        <label><input type="checkbox" id="toggle-sma50"> SMA 50</label>
+        <label><input type="checkbox" id="toggle-sma100"> SMA 100</label>
+        <label><input type="checkbox" id="toggle-sma200"> SMA 200</label>
+        <label><input type="checkbox" id="toggle-ichimoku"> Ichimoku</label>
+        <label><input type="checkbox" id="toggle-volume" checked> Volume</label>
+      </div>
+    </section>
+
+    <section id="indicators-display">
+      <h2>Current Indicators</h2>
+      <div id="indicator-values"></div>
+    </section>
+
+    <section id="forecasts">
+      <h2>Forecasts</h2>
+      <div id="forecast-cards"></div>
+    </section>
+
+    <section id="error-section" style="display: none;">
+      <h2>Warnings & Errors</h2>
+      <div id="error-list"></div>
+    </section>
+  </main>
+
+  <footer>
+    <p>Scoreboard v1.0 | Data sources: OKX, Farside</p>
+  </footer>
+
+  <script src="/js/app.js" type="module"></script>
+</body>
+</html>

@@ -1,0 +1,17 @@
+{
+  "symbol": "ETH_ETF",
+  "interval": "1d",
+  "indicators": {
+    "ema20": 0,
+    "sma20": 0,
+    "sma50": 0,
+    "ichimoku": {
+      "tenkan": 0,
+      "kijun": 0,
+      "senkouA": 0,
+      "senkouB": 0,
+      "chikou": 0
+    }
+  },
+  "timestamp": "2026-08-31T23:17:28.330Z"
+}
