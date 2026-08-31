@@ -3,6 +3,7 @@ export class ChartView {
     this.canvas = document.getElementById(canvasId);
     this.ctx = this.canvas.getContext('2d');
     this.data = null;
+    this.predictedSeries = null;
     this.tooltip = null;
     this.mousePos = null;
     this.options = {
@@ -13,6 +14,7 @@ export class ChartView {
       showIchimoku: false,
       showVolume: false,
       showPredicted: false,
+      showActual: false,
       showNaive: true
     };
     
@@ -22,6 +24,10 @@ export class ChartView {
 
   setData(data) {
     this.data = data;
+  }
+
+  setPredictedSeries(series) {
+    this.predictedSeries = series;
   }
 
   setOption(key, value) {
@@ -138,12 +144,23 @@ export class ChartView {
     }
 
     if (this.options.showIchimoku) {
-      this.drawLine(this.data.map(d => d.tenkan), xStep, priceToY, padding.left, '#06b6d4', 1.5);
-      this.drawLine(this.data.map(d => d.kijun), xStep, priceToY, padding.left, '#ec4899', 1.5);
+      this.drawIchimokuCloud(xStep, priceToY, padding.left);
     }
 
     if (this.options.showVolume && volumeHeight > 0) {
       this.drawVolume(padding, chartWidth, volumeHeight, xStep, height);
+    }
+
+    if (this.predictedSeries) {
+      if (this.options.showPredicted && this.predictedSeries.predicted) {
+        this.drawPredictedLine(this.predictedSeries.predicted, priceToY, padding.left, '#9333ea', 2, [5, 5]);
+      }
+      if (this.options.showActual && this.predictedSeries.actual) {
+        this.drawPredictedLine(this.predictedSeries.actual, priceToY, padding.left, '#10b981', 2, []);
+      }
+      if (this.options.showNaive && this.predictedSeries.naive) {
+        this.drawPredictedLine(this.predictedSeries.naive, priceToY, padding.left, '#f59e0b', 1.5, [10, 5]);
+      }
     }
 
     this.ctx.fillStyle = '#333';
@@ -182,6 +199,77 @@ export class ChartView {
       }
     });
     this.ctx.stroke();
+  }
+
+  drawIchimokuCloud(xStep, priceToY, offsetX) {
+    const senkouA = this.data.map(d => d.senkouA);
+    const senkouB = this.data.map(d => d.senkouB);
+    
+    this.ctx.beginPath();
+    let started = false;
+    for (let i = 0; i < this.data.length; i++) {
+      if (senkouA[i] !== null && !isNaN(senkouA[i])) {
+        const x = offsetX + i * xStep;
+        const y = priceToY(senkouA[i]);
+        if (!started) {
+          this.ctx.moveTo(x, y);
+          started = true;
+        } else {
+          this.ctx.lineTo(x, y);
+        }
+      }
+    }
+    
+    for (let i = this.data.length - 1; i >= 0; i--) {
+      if (senkouB[i] !== null && !isNaN(senkouB[i])) {
+        const x = offsetX + i * xStep;
+        const y = priceToY(senkouB[i]);
+        this.ctx.lineTo(x, y);
+      }
+    }
+    
+    this.ctx.closePath();
+    this.ctx.fillStyle = 'rgba(102, 126, 234, 0.1)';
+    this.ctx.fill();
+    
+    this.drawLine(this.data.map(d => d.tenkan), xStep, priceToY, offsetX, '#06b6d4', 1.5);
+    this.drawLine(this.data.map(d => d.kijun), xStep, priceToY, offsetX, '#ec4899', 1.5);
+    this.drawLine(senkouA, xStep, priceToY, offsetX, '#10b981', 1);
+    this.drawLine(senkouB, xStep, priceToY, offsetX, '#ef4444', 1);
+  }
+
+  drawPredictedLine(points, priceToY, offsetX, color, width, dash = []) {
+    if (!points || points.length === 0) return;
+    
+    const dataTimestamps = this.data.map(d => d.timestamp || d.time || 0);
+    const minTs = Math.min(...dataTimestamps);
+    const maxTs = Math.max(...dataTimestamps);
+    const timeRange = maxTs - minTs;
+    const chartWidth = this.canvas.width / (window.devicePixelRatio || 1) - 150;
+    
+    this.ctx.strokeStyle = color;
+    this.ctx.lineWidth = width;
+    this.ctx.setLineDash(dash);
+    this.ctx.beginPath();
+    
+    let started = false;
+    points.forEach((point) => {
+      if (point.value !== null && !isNaN(point.value)) {
+        const relativePos = (point.timestamp - minTs) / timeRange;
+        const x = offsetX + relativePos * chartWidth;
+        const y = priceToY(point.value);
+        
+        if (!started) {
+          this.ctx.moveTo(x, y);
+          started = true;
+        } else {
+          this.ctx.lineTo(x, y);
+        }
+      }
+    });
+    
+    this.ctx.stroke();
+    this.ctx.setLineDash([]);
   }
 
   drawVolume(padding, chartWidth, volumeHeight, xStep, canvasHeight) {

@@ -88,12 +88,33 @@ export class AppController {
     const data = await this.loadData(symbol, interval);
     
     this.views.chart.setData(data);
+    
+    try {
+      const predictedData = await this.loadPredictedSeries(symbol, interval, 7);
+      this.views.chart.setPredictedSeries(predictedData);
+    } catch (error) {
+      console.warn('Could not load predicted series:', error);
+    }
+    
     this.views.chart.render();
     
     this.views.stats.render(data);
     
     if (this.views.signals) {
       await this.updateSignals(symbol);
+    }
+  }
+
+  async loadPredictedSeries(symbol, interval, horizon) {
+    try {
+      const response = await fetch(`/api/predicted-series?symbol=${symbol}&interval=${interval}&horizon=${horizon}`);
+      if (!response.ok) throw new Error('Failed to load predicted series');
+      
+      const result = await response.json();
+      return result;
+    } catch (error) {
+      console.error('Error loading predicted series:', error);
+      return null;
     }
   }
 
@@ -144,7 +165,7 @@ export class AppController {
       await this.handleGenerateForecast(symbol, horizon);
     });
 
-    ['toggle-ma20', 'toggle-ma50', 'toggle-ma100', 'toggle-ma200', 'toggle-ichimoku', 'toggle-volume', 'toggle-naive'].forEach(id => {
+    ['toggle-ma20', 'toggle-ma50', 'toggle-ma100', 'toggle-ma200', 'toggle-ichimoku', 'toggle-volume', 'toggle-predicted', 'toggle-actual', 'toggle-naive'].forEach(id => {
       const checkbox = document.getElementById(id);
       if (checkbox) {
         checkbox.addEventListener('change', () => {

@@ -1,6 +1,6 @@
 import { seriesModel } from '../model/series.js';
-import { generateForecast, createForecastCard, calculateMAE } from '../model/forecast.js';
-import { forecastStore } from '../model/store.js';
+import { generateForecast, createForecastCard, calculateMAE, generatePredictedSeries } from '../model/forecast.js';
+import { forecastStore } from '../model/store-adapter.js';
 
 export function handleGetSeries(req, res) {
   const { symbol = 'BTC', interval = '1d', from, to, fields } = req.query;
@@ -130,6 +130,31 @@ export function handleGetForecasts(req, res) {
     res.json({
       count: forecasts.length,
       forecasts: forecasts.slice(-20)
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+}
+
+export function handleGetPredictedSeries(req, res) {
+  const { symbol = 'BTC', horizon = '7', interval = '1d' } = req.query;
+  const horizonDays = parseInt(horizon, 10);
+  
+  try {
+    const data = seriesModel.getIndicators(symbol, interval);
+    
+    if (data.length === 0) {
+      res.status(404).json({ error: 'No data available for symbol' });
+      return;
+    }
+    
+    const series = generatePredictedSeries(data, horizonDays);
+    
+    res.json({
+      symbol,
+      horizonDays,
+      interval,
+      ...series
     });
   } catch (error) {
     res.status(500).json({ error: error.message });

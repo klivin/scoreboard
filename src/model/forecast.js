@@ -96,6 +96,39 @@ function calculateVolatility(data) {
   return Math.sqrt(variance);
 }
 
+export function generatePredictedSeries(data, horizonDays) {
+  const predicted = [];
+  const naive = [];
+  const actual = [];
+  
+  for (let i = Math.max(0, data.length - 60); i < data.length; i++) {
+    const historicalData = data.slice(0, i + 1);
+    
+    if (historicalData.length >= horizonDays + 7) {
+      const forecast = generateForecast(historicalData, horizonDays);
+      const naiveForecast = naiveBaseline(historicalData, horizonDays);
+      
+      const futureIndex = i + horizonDays;
+      if (futureIndex < data.length) {
+        predicted.push({
+          timestamp: data[futureIndex].timestamp,
+          value: forecast.prediction
+        });
+        naive.push({
+          timestamp: data[futureIndex].timestamp,
+          value: naiveForecast.prediction
+        });
+        actual.push({
+          timestamp: data[futureIndex].timestamp,
+          value: data[futureIndex].close
+        });
+      }
+    }
+  }
+  
+  return { predicted, naive, actual };
+}
+
 export function createForecastCard(symbol, data, horizonDays) {
   const forecast = generateForecast(data, horizonDays);
   const naive = naiveBaseline(data, horizonDays);
