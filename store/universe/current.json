@@ -1,0 +1,66 @@
+{
+  "assetCount": 10,
+  "lastUpdate": "2026-08-31T23:17:28.328Z",
+  "assets": [
+    {
+      "symbol": "BTC",
+      "rank": 1,
+      "marketCap": 100000000000,
+      "categories": []
+    },
+    {
+      "symbol": "ETH",
+      "rank": 2,
+      "marketCap": 50000000000,
+      "categories": []
+    },
+    {
+      "symbol": "BNB",
+      "rank": 3,
+      "marketCap": 33333333333.333332,
+      "categories": []
+    },
+    {
+      "symbol": "SOL",
+      "rank": 4,
+      "marketCap": 25000000000,
+      "categories": []
+    },
+    {
+      "symbol": "XRP",
+      "rank": 5,
+      "marketCap": 20000000000,
+      "categories": []
+    },
+    {
+      "symbol": "ADA",
+      "rank": 6,
+      "marketCap": 16666666666.666666,
+      "categories": []
+    },
+    {
+      "symbol": "DOGE",
+      "rank": 7,
+      "marketCap": 14285714285.714285,
+      "categories": []
+    },
+    {
+      "symbol": "AVAX",
+      "rank": 8,
+      "marketCap": 12500000000,
+      "categories": []
+    },
+    {
+      "symbol": "DOT",
+      "rank": 9,
+      "marketCap": 11111111111.11111,
+      "categories": []
+    },
+    {
+      "symbol": "MATIC",
+      "rank": 10,
+      "marketCap": 10000000000,
+      "categories": []
+    }
+  ]
+}

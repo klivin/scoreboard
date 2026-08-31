@@ -1,0 +1,77 @@
+{
+  "errorCount": 9,
+  "errors": [
+    {
+      "level": "warn",
+      "message": "Missing expected file: okx_btc_oi_1h.json",
+      "context": {
+        "filename": "okx_btc_oi_1h.json"
+      },
+      "timestamp": "2026-08-31T23:17:28.327Z"
+    },
+    {
+      "level": "warn",
+      "message": "Missing expected file: okx_btc_oi_1d.json",
+      "context": {
+        "filename": "okx_btc_oi_1d.json"
+      },
+      "timestamp": "2026-08-31T23:17:28.327Z"
+    },
+    {
+      "level": "warn",
+      "message": "Missing expected file: okx_btc_candles_1h.json",
+      "context": {
+        "filename": "okx_btc_candles_1h.json"
+      },
+      "timestamp": "2026-08-31T23:17:28.327Z"
+    },
+    {
+      "level": "warn",
+      "message": "Missing expected file: okx_btc_candles_1d.json",
+      "context": {
+        "filename": "okx_btc_candles_1d.json"
+      },
+      "timestamp": "2026-08-31T23:17:28.328Z"
+    },
+    {
+      "level": "warn",
+      "message": "Missing expected file: farside_btc_etf.json",
+      "context": {
+        "filename": "farside_btc_etf.json"
+      },
+      "timestamp": "2026-08-31T23:17:28.328Z"
+    },
+    {
+      "level": "warn",
+      "message": "Missing expected file: farside_eth_etf.json",
+      "context": {
+        "filename": "farside_eth_etf.json"
+      },
+      "timestamp": "2026-08-31T23:17:28.328Z"
+    },
+    {
+      "level": "warn",
+      "message": "Missing expected file: top100_freeze.json",
+      "context": {
+        "filename": "top100_freeze.json"
+      },
+      "timestamp": "2026-08-31T23:17:28.328Z"
+    },
+    {
+      "level": "warn",
+      "message": "Missing expected file: alt_btc_ratios.json",
+      "context": {
+        "filename": "alt_btc_ratios.json"
+      },
+      "timestamp": "2026-08-31T23:17:28.328Z"
+    },
+    {
+      "level": "warn",
+      "message": "Missing expected file: backtest_sketch.json",
+      "context": {
+        "filename": "backtest_sketch.json"
+      },
+      "timestamp": "2026-08-31T23:17:28.329Z"
+    }
+  ]
+}
