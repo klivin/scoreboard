@@ -172,7 +172,9 @@ export class ChartView {
       const x = padding.left + i * xStep;
       const ts = this.data[i].timestamp || this.data[i].time || 0;
       const date = new Date(ts);
-      const label = `${date.getMonth() + 1}/${date.getDate()}`;
+      const month = date.getUTCMonth() + 1;
+      const day = date.getUTCDate();
+      const label = `${month}/${day}`;
       this.ctx.fillText(label, x, height - volumeHeight - 25);
     }
 

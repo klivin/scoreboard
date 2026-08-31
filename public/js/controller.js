@@ -9,9 +9,18 @@ export class AppController {
   async loadData(symbol, interval = '1d') {
     try {
       const response = await fetch(`/api/indicators?symbol=${symbol}&interval=${interval}`);
-      if (!response.ok) throw new Error('Failed to load data');
+      
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Failed to load data');
+      }
       
       const result = await response.json();
+      
+      if (result.error) {
+        throw new Error(result.error);
+      }
+      
       return result.data;
     } catch (error) {
       console.error('Error loading data:', error);
@@ -150,7 +159,16 @@ export class AppController {
     document.getElementById('load-btn').addEventListener('click', async () => {
       const symbol = document.getElementById('symbol-select').value || 'BTC';
       const interval = document.getElementById('interval-select').value || '1d';
-      await this.updateOverview(symbol, interval);
+      
+      this.views.chart.setData(null);
+      this.views.chart.render();
+      
+      try {
+        await this.updateOverview(symbol, interval);
+      } catch (error) {
+        alert(`Error loading ${symbol} ${interval}: ${error.message}`);
+        console.error(error);
+      }
     });
 
     document.getElementById('download-csv-btn').addEventListener('click', async () => {

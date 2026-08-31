@@ -20,27 +20,52 @@ export class SeriesModel {
     
     let series = null;
     
-    if (symbol === 'BTC' || symbol === 'BTCUSDT') {
-      const key = interval === '1h' ? 'oi_1h' : 'oi_1d';
-      series = this.data[key].data;
+    if (this.data.indicators && this.data.indicators.data.length > 0) {
+      const symbolUpper = symbol.toUpperCase();
+      const indicators = this.data.indicators.data;
       
-      if (series.length === 0 && this.data[key].missing) {
-        const candleKey = interval === '1h' ? 'candles_1h' : 'candles_1d';
-        series = this.data[candleKey].data;
-        
-        if (series.length === 0) {
-          series = getFixtureData('candles');
-        }
-      }
-    } else if (symbol === 'ETH') {
-      series = this.data.candles_1d.data;
-      if (series.length === 0) {
-        series = getFixtureData('candles');
+      const symbolData = indicators.filter(row => 
+        row.symbol && row.symbol.toUpperCase() === symbolUpper
+      );
+      
+      if (symbolData.length > 0) {
+        series = symbolData.map(row => ({
+          date_utc: row.date_utc,
+          timestamp: row.date_utc ? new Date(row.date_utc + 'T00:00:00Z').getTime() : Date.now(),
+          open: row.open || 0,
+          high: row.high || 0,
+          low: row.low || 0,
+          close: row.close || 0,
+          volume: row.volume || 0,
+          ma20: row.ma20,
+          ma50: row.ma50,
+          ma100: row.ma100,
+          ma200: row.ma200,
+          tenkan: row.tenkan,
+          kijun: row.kijun,
+          senkouA: row.senkou_a,
+          senkouB: row.senkou_b,
+          chikou: row.chikou
+        }));
       }
     }
     
     if (!series || series.length === 0) {
-      return [];
+      if (symbol === 'BTC' || symbol === 'BTCUSDT') {
+        const key = interval === '1h' ? 'oi_1h' : 'oi_1d';
+        series = this.data[key].data;
+        
+        if (series.length === 0 && this.data[key].missing) {
+          const candleKey = interval === '1h' ? 'candles_1h' : 'candles_1d';
+          series = this.data[candleKey].data;
+          
+          if (series.length === 0) {
+            throw new Error(`No data available for ${symbol} ${interval}`);
+          }
+        }
+      } else {
+        throw new Error(`No data available for ${symbol} ${interval}`);
+      }
     }
 
     let filtered = series;
@@ -80,6 +105,10 @@ export class SeriesModel {
   getIndicators(symbol, interval = '1d') {
     const series = this.getSeries(symbol, interval);
     if (series.length === 0) return [];
+    
+    if (series[0] && series[0].ma20 !== undefined) {
+      return series;
+    }
     
     return addIndicators(series);
   }
