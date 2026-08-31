@@ -41,4 +41,6 @@ This directory should contain Flow's v1 pack data files. The ingest module will 
 All CSV files should have headers. Timestamps should be in ISO 8601 format or Unix timestamps.
 JSON files should be valid JSON with appropriate schema for their content type.
 
-If any files are missing during ingest, the system will use fixture data and mark them as missing in the UI.
+If a named file is missing, ingest marks it missing and does not invent OI, ETF, price, indicator, or universe series. The UI shows an on-page error when the selected symbol+interval has no pack rows. CoinGecko 429 left most categories blank — those stay blank.
+
+`indicators_daily.csv` is the multi-symbol daily file. Columns: `date_utc,asset_id,symbol,open,high,low,close,volume,ma20,ma50,ma100,ma200,tenkan,kijun,senkou_a,senkou_b,chikou`. Pack symbols: AVAX BNB BTC DOGE ETH LINK PEPE SHIB SOL SUI TRUMP XRP. 1h OKX files are BTC-only.

@@ -1,3 +1,5 @@
+import { optionKeyFromToggleId, TOGGLE_OPTION_MAP } from './toggles.js';
+
 export class AppController {
   constructor(views) {
     this.views = views;
@@ -6,35 +8,43 @@ export class AppController {
     this.currentHorizon = 7;
   }
 
-  async loadData(symbol, interval = '1d') {
-    try {
-      const response = await fetch(`/api/indicators?symbol=${symbol}&interval=${interval}`);
-      
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || 'Failed to load data');
-      }
-      
-      const result = await response.json();
-      
-      if (result.error) {
-        throw new Error(result.error);
-      }
-      
-      return result.data;
-    } catch (error) {
-      console.error('Error loading data:', error);
-      throw error;
+  showPageError(message) {
+    const alert = document.getElementById('missing-alert');
+    if (!alert) {
+      window.alert(message);
+      return;
     }
+    alert.classList.remove('hidden');
+    alert.classList.add('error');
+    alert.innerHTML = `<strong>Error:</strong> ${message}`;
+  }
+
+  clearPageError() {
+    const alert = document.getElementById('missing-alert');
+    if (!alert) return;
+    alert.classList.add('hidden');
+    alert.classList.remove('error');
+    alert.innerHTML = '';
+  }
+
+  async loadData(symbol, interval = '1d') {
+    const response = await fetch(`/api/indicators?symbol=${encodeURIComponent(symbol)}&interval=${encodeURIComponent(interval)}`);
+    const result = await response.json().catch(() => ({}));
+
+    if (!response.ok || result.error) {
+      throw new Error(result.error || `Failed to load ${symbol} ${interval}`);
+    }
+
+    return result.data;
   }
 
   async downloadCSV(symbol, interval = '1d') {
     try {
-      const url = `/api/series?symbol=${symbol}&interval=${interval}&format=csv`;
+      const url = `/api/series?symbol=${encodeURIComponent(symbol)}&interval=${encodeURIComponent(interval)}&format=csv`;
       window.open(url, '_blank');
     } catch (error) {
       console.error('Error downloading CSV:', error);
-      alert('Failed to download CSV');
+      this.showPageError('Failed to download CSV');
     }
   }
 
@@ -42,7 +52,7 @@ export class AppController {
     try {
       const response = await fetch('/api/missing');
       if (!response.ok) return { missing: [], usingFixtures: false };
-      
+
       const result = await response.json();
       return result;
     } catch (error) {
@@ -52,23 +62,15 @@ export class AppController {
   }
 
   async generateForecast(symbol, horizon) {
-    try {
-      const response = await fetch(`/api/forecast?symbol=${symbol}&horizon=${horizon}`);
-      if (!response.ok) throw new Error('Failed to generate forecast');
-      
-      const result = await response.json();
-      return result;
-    } catch (error) {
-      console.error('Error generating forecast:', error);
-      throw error;
-    }
+    const response = await fetch(`/api/forecast?symbol=${encodeURIComponent(symbol)}&horizon=${horizon}`);
+    if (!response.ok) throw new Error('Failed to generate forecast');
+    return response.json();
   }
 
   async loadForecasts() {
     try {
       const response = await fetch('/api/forecasts');
       if (!response.ok) throw new Error('Failed to load forecasts');
-      
       const result = await response.json();
       return result.forecasts;
     } catch (error) {
@@ -81,57 +83,87 @@ export class AppController {
     try {
       const response = await fetch('/api/universe');
       if (!response.ok) throw new Error('Failed to load universe');
-      
-      const result = await response.json();
-      return result;
+      return response.json();
     } catch (error) {
       console.error('Error loading universe:', error);
       return null;
     }
   }
 
+  async populateSymbols() {
+    const select = document.getElementById('symbol-select');
+    if (!select) return;
+
+    try {
+      const response = await fetch('/api/symbols');
+      if (!response.ok) return;
+      const result = await response.json();
+      const symbols = result.symbols && result.symbols.length ? result.symbols : ['BTC'];
+      const current = select.value || this.currentSymbol;
+      select.innerHTML = symbols.map((symbol) => (
+        `<option value="${symbol}"${symbol === current ? ' selected' : ''}>${symbol}</option>`
+      )).join('');
+      this.currentSymbol = select.value;
+    } catch (error) {
+      console.warn('Could not load symbol list:', error);
+    }
+  }
+
+  syncChartOptionsFromCheckboxes() {
+    Object.keys(TOGGLE_OPTION_MAP).forEach((id) => {
+      const checkbox = document.getElementById(id);
+      const option = optionKeyFromToggleId(id);
+      if (checkbox && option) {
+        this.views.chart.setOption(option, checkbox.checked);
+      }
+    });
+  }
+
+  getSelectedSymbol() {
+    const select = document.getElementById('symbol-select');
+    return (select && select.value) || this.currentSymbol || 'BTC';
+  }
+
+  getSelectedInterval() {
+    const select = document.getElementById('interval-select');
+    return (select && select.value) || this.currentInterval || '1d';
+  }
+
   async updateOverview(symbol, interval = '1d') {
     this.currentSymbol = symbol;
     this.currentInterval = interval;
-    
+    this.clearPageError();
+
     const data = await this.loadData(symbol, interval);
-    
+
     this.views.chart.setData(data);
-    
+
     try {
       const predictedData = await this.loadPredictedSeries(symbol, interval, 7);
       this.views.chart.setPredictedSeries(predictedData);
     } catch (error) {
       console.warn('Could not load predicted series:', error);
     }
-    
+
+    this.syncChartOptionsFromCheckboxes();
     this.views.chart.render();
-    
     this.views.stats.render(data);
-    
+
     if (this.views.signals) {
       await this.updateSignals(symbol);
     }
   }
 
   async loadPredictedSeries(symbol, interval, horizon) {
-    try {
-      const response = await fetch(`/api/predicted-series?symbol=${symbol}&interval=${interval}&horizon=${horizon}`);
-      if (!response.ok) throw new Error('Failed to load predicted series');
-      
-      const result = await response.json();
-      return result;
-    } catch (error) {
-      console.error('Error loading predicted series:', error);
-      return null;
-    }
+    const response = await fetch(`/api/predicted-series?symbol=${encodeURIComponent(symbol)}&interval=${encodeURIComponent(interval)}&horizon=${horizon}`);
+    if (!response.ok) throw new Error('Failed to load predicted series');
+    return response.json();
   }
 
   async updateSignals(symbol) {
     try {
-      const response = await fetch(`/api/signals?symbol=${symbol}`);
+      const response = await fetch(`/api/signals?symbol=${encodeURIComponent(symbol)}`);
       if (!response.ok) return;
-      
       const signals = await response.json();
       this.views.signals.render(signals);
     } catch (error) {
@@ -155,55 +187,74 @@ export class AppController {
     return forecast;
   }
 
+  async reloadSelected() {
+    const symbol = this.getSelectedSymbol();
+    const interval = this.getSelectedInterval();
+
+    this.views.chart.setData(null);
+    this.views.chart.render();
+
+    try {
+      await this.updateOverview(symbol, interval);
+    } catch (error) {
+      this.showPageError(`No data for ${symbol} ${interval}: ${error.message}`);
+      console.error(error);
+    }
+  }
+
   setupEventListeners() {
-    document.getElementById('load-btn').addEventListener('click', async () => {
-      const symbol = document.getElementById('symbol-select').value || 'BTC';
-      const interval = document.getElementById('interval-select').value || '1d';
-      
-      this.views.chart.setData(null);
-      this.views.chart.render();
-      
-      try {
-        await this.updateOverview(symbol, interval);
-      } catch (error) {
-        alert(`Error loading ${symbol} ${interval}: ${error.message}`);
-        console.error(error);
-      }
-    });
+    const loadBtn = document.getElementById('load-btn');
+    if (loadBtn) {
+      loadBtn.addEventListener('click', () => this.reloadSelected());
+    }
 
-    document.getElementById('download-csv-btn').addEventListener('click', async () => {
-      const symbol = document.getElementById('symbol-select').value || 'BTC';
-      const interval = document.getElementById('interval-select').value || '1d';
-      await this.downloadCSV(symbol, interval);
-    });
+    const symbolSelect = document.getElementById('symbol-select');
+    if (symbolSelect) {
+      symbolSelect.addEventListener('change', () => this.reloadSelected());
+    }
 
-    document.getElementById('generate-forecast-btn').addEventListener('click', async () => {
-      const symbol = document.getElementById('symbol-select').value || 'BTC';
-      const horizon = parseInt(document.getElementById('horizon-select').value, 10);
-      await this.handleGenerateForecast(symbol, horizon);
-    });
+    const intervalSelect = document.getElementById('interval-select');
+    if (intervalSelect) {
+      intervalSelect.addEventListener('change', () => this.reloadSelected());
+    }
 
-    ['toggle-ma20', 'toggle-ma50', 'toggle-ma100', 'toggle-ma200', 'toggle-ichimoku', 'toggle-volume', 'toggle-predicted', 'toggle-actual', 'toggle-naive'].forEach(id => {
+    const csvBtn = document.getElementById('download-csv-btn');
+    if (csvBtn) {
+      csvBtn.addEventListener('click', async () => {
+        await this.downloadCSV(this.getSelectedSymbol(), this.getSelectedInterval());
+      });
+    }
+
+    const forecastBtn = document.getElementById('generate-forecast-btn');
+    if (forecastBtn) {
+      forecastBtn.addEventListener('click', async () => {
+        const symbol = this.getSelectedSymbol();
+        const horizon = parseInt(document.getElementById('horizon-select').value, 10);
+        await this.handleGenerateForecast(symbol, horizon);
+      });
+    }
+
+    Object.keys(TOGGLE_OPTION_MAP).forEach((id) => {
       const checkbox = document.getElementById(id);
-      if (checkbox) {
-        checkbox.addEventListener('change', () => {
-          const option = id.replace('toggle-', 'show').replace(/-([a-z])/g, (_, c) => c.toUpperCase());
-          this.views.chart.setOption(option, checkbox.checked);
-          this.views.chart.render();
-        });
-      }
+      if (!checkbox) return;
+      checkbox.addEventListener('change', () => {
+        const option = optionKeyFromToggleId(id);
+        if (!option) return;
+        this.views.chart.setOption(option, checkbox.checked);
+        this.views.chart.render();
+      });
     });
 
-    document.querySelectorAll('.tab-btn').forEach(btn => {
+    document.querySelectorAll('.tab-btn').forEach((btn) => {
       btn.addEventListener('click', async () => {
         const tab = btn.dataset.tab;
-        
-        document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-        document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
-        
+
+        document.querySelectorAll('.tab-btn').forEach((b) => b.classList.remove('active'));
+        document.querySelectorAll('.tab-content').forEach((c) => c.classList.remove('active'));
+
         btn.classList.add('active');
         document.getElementById(tab).classList.add('active');
-        
+
         if (tab === 'forecast') {
           await this.updateForecasts();
         } else if (tab === 'universe') {
@@ -214,16 +265,21 @@ export class AppController {
   }
 
   async init() {
+    this.setupEventListeners();
+    this.syncChartOptionsFromCheckboxes();
+
     const missing = await this.checkMissing();
-    
+
     if (missing.usingFixtures && missing.missing.length > 0) {
       const alert = document.getElementById('missing-alert');
-      alert.innerHTML = `<strong>Warning:</strong> Missing data files: ${missing.missing.join(', ')}. Using fixture data.`;
-      alert.classList.remove('hidden');
+      if (alert) {
+        alert.innerHTML = `<strong>Warning:</strong> Missing data files: ${missing.missing.join(', ')}. Using fixture data only when a named file is absent.`;
+        alert.classList.remove('hidden');
+        alert.classList.remove('error');
+      }
     }
 
-    await this.updateOverview(this.currentSymbol);
-    
-    this.setupEventListeners();
+    await this.populateSymbols();
+    await this.reloadSelected();
   }
 }

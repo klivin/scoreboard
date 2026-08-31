@@ -1,5 +1,5 @@
 import { seriesModel } from '../model/series.js';
-import { generateForecast, createForecastCard, calculateMAE, generatePredictedSeries } from '../model/forecast.js';
+import { generateForecast, createForecastCard, generatePredictedSeries } from '../model/forecast.js';
 import { forecastStore } from '../model/store-adapter.js';
 
 export function handleGetSeries(req, res) {
@@ -34,7 +34,8 @@ export function handleGetSeries(req, res) {
       });
     }
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    res.status(error.message && error.message.startsWith('No data available') ? 404 : 500)
+      .json({ error: error.message });
   }
 }
 
@@ -50,6 +51,16 @@ export function handleGetIndicators(req, res) {
       count: indicators.length,
       data: indicators.slice(-90)
     });
+  } catch (error) {
+    res.status(error.message && error.message.startsWith('No data available') ? 404 : 500)
+      .json({ error: error.message });
+  }
+}
+
+export function handleGetSymbols(req, res) {
+  try {
+    const symbols = seriesModel.getAvailableSymbols();
+    res.json({ symbols });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }

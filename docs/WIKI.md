@@ -438,8 +438,8 @@ After updates, users may need to clear browser cache to see changes. Hard refres
 
 ### Overlays Don't Toggle
 - **Symptom:** Checking boxes doesn't change chart
-- **Cause:** Event listener not calling render
-- **Fix:** Verify `setOption()` + `render()` called on checkbox change
+- **Cause:** `toggle-ma20` was mapped to `showma20`, not `showMA20`. The canvas never saw the option change.
+- **Fix:** Use `public/js/toggles.js` (`toggle-ma20` → `showMA20`). `setOption(mappedKey, checked)` then `render()`.
 
 ### No Data Available Error
 - **Symptom:** API returns error for valid symbol
@@ -459,16 +459,17 @@ After updates, users may need to clear browser cache to see changes. Hard refres
 
 ## Changelog
 
-### Latest (PR #1)
-- ✅ Fixed ETH loading (no longer shows BTC data)
-- ✅ Fixed X-axis dates (distinct dates, not all 12/31)
-- ✅ Fixed Load Data button (now reloads from API)
-- ✅ Wired all overlay toggles (MA/Ichimoku/Volume)
-- ✅ Full Ichimoku Cloud with shading
+### Latest (PR #1, grok-4.6)
+- ✅ Fixed ETH loading (filter `indicators_daily.csv` by `symbol`; no BTC fallback)
+- ✅ ETH 1h errors on-page instead of drawing daily ETH or BTC
+- ✅ Fixed X-axis dates (UTC `date_utc` ticks, not all 12/31)
+- ✅ Load Data re-fetches `/api/indicators` for the selected symbol+interval and redraws
+- ✅ Overlay toggles actually flip canvas keys (`showMA20`, not `showma20`)
+- ✅ Full Ichimoku Cloud (tenkan/kijun/senkou A/B fill + chikou) and volume pane
 - ✅ Store adapter for Firestore
 - ✅ Predicted vs Actual vs Naive series
 - ✅ HiDPI canvas rendering
-- ✅ Multi-symbol support from indicators_daily.csv
+- ✅ Symbol list from the pack (12 names in the Flow indicators file)
 
 ### Initial Release
 - ✅ Vanilla JS MVC architecture

@@ -6,7 +6,7 @@
   "type": "module",
   "scripts": {
     "start": "node src/server.js",
-    "test": "node --test src/**/*.test.js",
+    "test": "node --test src/model/*.test.js src/**/*.test.js public/js/toggles.test.js",
     "dev": "node --watch src/server.js"
   },
   "keywords": ["crypto", "forecasting", "analysis"],

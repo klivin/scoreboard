@@ -12,7 +12,7 @@ export class ChartView {
       showMA100: false,
       showMA200: false,
       showIchimoku: false,
-      showVolume: false,
+      showVolume: true,
       showPredicted: false,
       showActual: false,
       showNaive: true
@@ -34,12 +34,25 @@ export class ChartView {
     this.options[key] = value;
   }
 
+  formatPrice(price) {
+    if (!Number.isFinite(price)) return '';
+    const abs = Math.abs(price);
+    if (abs >= 1000) return price.toFixed(0);
+    if (abs >= 1) return price.toFixed(2);
+    return price.toFixed(6);
+  }
+
+  formatUtcTick(timestamp) {
+    const date = new Date(timestamp);
+    if (Number.isNaN(date.getTime())) return '';
+    return `${date.getUTCMonth() + 1}/${date.getUTCDate()}`;
+  }
+
   handleMouseMove(e) {
     const rect = this.canvas.getBoundingClientRect();
-    const dpr = window.devicePixelRatio || 1;
     this.mousePos = {
-      x: (e.clientX - rect.left) * dpr,
-      y: (e.clientY - rect.top) * dpr
+      x: e.clientX - rect.left,
+      y: e.clientY - rect.top
     };
     this.render();
   }
@@ -110,7 +123,7 @@ export class ChartView {
       this.ctx.font = '12px sans-serif';
       this.ctx.textAlign = 'right';
       this.ctx.textBaseline = 'middle';
-      this.ctx.fillText(price.toFixed(0), padding.left - 10, y);
+      this.ctx.fillText(this.formatPrice(price), padding.left - 10, y);
     }
 
     this.ctx.strokeStyle = '#667eea';
@@ -170,12 +183,11 @@ export class ChartView {
     const dateStep = Math.max(1, Math.floor(this.data.length / 8));
     for (let i = 0; i < this.data.length; i += dateStep) {
       const x = padding.left + i * xStep;
-      const ts = this.data[i].timestamp || this.data[i].time || 0;
-      const date = new Date(ts);
-      const month = date.getUTCMonth() + 1;
-      const day = date.getUTCDate();
-      const label = `${month}/${day}`;
-      this.ctx.fillText(label, x, height - volumeHeight - 25);
+      const ts = this.data[i].timestamp || this.data[i].time;
+      const label = this.formatUtcTick(ts);
+      if (label) {
+        this.ctx.fillText(label, x, height - volumeHeight - 25);
+      }
     }
 
     if (this.mousePos) {
@@ -238,6 +250,7 @@ export class ChartView {
     this.drawLine(this.data.map(d => d.kijun), xStep, priceToY, offsetX, '#ec4899', 1.5);
     this.drawLine(senkouA, xStep, priceToY, offsetX, '#10b981', 1);
     this.drawLine(senkouB, xStep, priceToY, offsetX, '#ef4444', 1);
+    this.drawLine(this.data.map(d => d.chikou), xStep, priceToY, offsetX, '#64748b', 1.5);
   }
 
   drawPredictedLine(points, priceToY, offsetX, color, width, dash = []) {
@@ -320,13 +333,15 @@ export class ChartView {
     
     this.ctx.setLineDash([]);
 
-    const ts = point.timestamp || point.time || 0;
-    const date = new Date(ts);
-    const dateStr = `${date.getMonth() + 1}/${date.getDate()}/${date.getFullYear()}`;
+    const ts = point.timestamp || point.time;
+    const tipDate = new Date(ts);
+    const dateStr = Number.isNaN(tipDate.getTime())
+      ? 'n/a'
+      : `${tipDate.getUTCFullYear()}-${String(tipDate.getUTCMonth() + 1).padStart(2, '0')}-${String(tipDate.getUTCDate()).padStart(2, '0')}`;
     
     let tooltipLines = [
       `Date: ${dateStr}`,
-      `Close: $${point.close.toFixed(2)}`
+      `Close: $${this.formatPrice(point.close)}`
     ];
 
     if (point.oi) tooltipLines.push(`OI: ${point.oi.toFixed(0)}`);

@@ -43,21 +43,30 @@ export function findDataFile(filename) {
   return null;
 }
 
+function parseCsvCell(value) {
+  const text = String(value ?? '').trim();
+  if (text === '') return null;
+  if (/^-?\d+(\.\d+)?([eE][+-]?\d+)?$/.test(text)) {
+    return parseFloat(text);
+  }
+  return text;
+}
+
 export function parseCSV(content) {
-  const lines = content.trim().split('\n');
-  if (lines.length === 0) return [];
+  const lines = String(content || '').replace(/^\uFEFF/, '').trim().split(/\r?\n/);
+  if (lines.length === 0 || !lines[0]) return [];
   
   const headers = lines[0].split(',').map(h => h.trim());
   const rows = [];
   
   for (let i = 1; i < lines.length; i++) {
+    if (!lines[i].trim()) continue;
     const values = lines[i].split(',');
     if (values.length !== headers.length) continue;
     
     const row = {};
     headers.forEach((header, idx) => {
-      const value = values[idx].trim();
-      row[header] = isNaN(value) ? value : parseFloat(value);
+      row[header] = parseCsvCell(values[idx]);
     });
     rows.push(row);
   }

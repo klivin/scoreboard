@@ -51,6 +51,12 @@ h1 {
   display: none;
 }
 
+.alert.error {
+  background: #fde8e8;
+  border-color: #e11d48;
+  color: #9f1239;
+}
+
 .tabs {
   display: flex;
   gap: 10px;

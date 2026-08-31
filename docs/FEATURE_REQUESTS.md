@@ -48,16 +48,20 @@ Status key: **open** (not started) | **doing** (in progress) | **done** (shipped
 ### ✅ Overlays Actually Toggle
 **Status:** done  
 **Request:** Checking/unchecking overlay boxes must visibly change the chart  
+**Root cause (still live after earlier “fixes”):** checkbox ids were mapped with a hyphen-collapse regex (`toggle-ma20` → `showma20`) that never matched `ChartView` keys (`showMA20`). The canvas kept drawing the default MA20/MA50 pair.
+
+**Fix:** explicit map in `public/js/toggles.js` (`toggle-ma20` → `showMA20`, `toggle-ichimoku` → `showIchimoku`, …). Change handler calls `setOption(mappedKey, checked)` then `render()`.
+
 **Verification:**
 - MA50 checkbox: Orange line appears/disappears
 - MA100 checkbox: Red line appears/disappears
 - MA200 checkbox: Purple line appears/disappears
-- Ichimoku checkbox: Cyan/pink lines + cloud fill appears/disappears
+- Ichimoku checkbox: Cyan/pink lines + cloud fill + chikou appears/disappears
 - Volume checkbox: Blue histogram appears/disappears
 - Naive checkbox: Orange dashed line appears/disappears
 - Each change triggers immediate redraw
 
-**Shipped:** PR #1, toggles wired with proper data loading and rendering
+**Shipped:** PR #1, grok-4.6 pass — toggle keys actually match the canvas options
 
 ---
 
