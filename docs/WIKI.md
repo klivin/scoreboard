@@ -536,7 +536,7 @@ After updates, users may need to clear browser cache to see changes. Hard refres
 - ETF net flow (`net_flow_usd_millions`) and Open Interest (`oi` / `oi_ccy`) optional panes
 - Tooltip + day-tap strip: missing fields say missing, not 0
 - Short interest is not in the pack
-- Status: **doing** until BTC 1d Volume ON is verified in the UI (price ~70–80k, not a flat line)
+- Status: **done** — BTC 1d Volume ON: price ~58k–80k (not a flat line), volume/ETF/OI on separate panes
 
 ### Latest (PR #1, grok-4.6)
 - ✅ Fixed ETH loading (filter `indicators_daily.csv` by `symbol`; no BTC fallback)

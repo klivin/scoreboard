@@ -66,7 +66,7 @@ Status key: **open** (not started) | **doing** (in progress) | **done** (shipped
 ---
 
 ### Price Y-axis crushed by volume / OI / ETF dollars
-**Status:** doing  
+**Status:** done  
 **Request:** BTC 1d tooltip shows price ~77822 but the Y-axis goes to 9,000,000,000,000 and price is a flat line at the bottom. Volume checkbox ON. Volume / OI / ETF dollars must never share the price scale with candles.
 
 **Pack magnitudes (do not invent):**
@@ -88,7 +88,9 @@ Status key: **open** (not started) | **doing** (in progress) | **done** (shipped
 - Hover Aug 28-ish: tooltip has price + MAs + volume + flow/OI when selected
 - `npm test && npm start`
 
-**Status rule:** `doing` while implementing. `done` only after the UI is verified (price fills the chart, not a flat bottom line).
+**Verified (localhost):** BTC 1d Volume ON — price Y-axis ~58k–80k (not trillions), candles fill the pane, volume histogram on a lower pane with its own billions scale. ETF net flow pane uses millions; OI uses contracts. Aug 28 tooltip: Price $77822, MA20 $70899, Volume 4.63B, ETF 18.4M USD, OI 2.15M contracts. Missing fields say missing.
+
+**Shipped:** overlay panes PR against main
 
 ---
 

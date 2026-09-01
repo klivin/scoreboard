@@ -30,6 +30,7 @@ export class ChartView {
     this.priceLines = [];
     this.trendSeries = [];
     this.rowByTime = new Map();
+    this.lastHoverRow = null;
     this.options = {
       showMA20: true,
       showMA50: true,
@@ -45,6 +46,11 @@ export class ChartView {
     };
 
     window.addEventListener('resize', () => this.resize());
+    if (this.container) {
+      this.container.addEventListener('click', () => {
+        if (this.lastHoverRow) this.updateDayStrip(this.lastHoverRow);
+      });
+    }
   }
 
   lwc() {
@@ -488,7 +494,7 @@ export class ChartView {
   }
 
   onClick(param) {
-    const row = this.rowFromParam(param);
+    const row = this.rowFromParam(param) || this.lastHoverRow;
     if (row) this.updateDayStrip(row);
 
     if (this.drawMode === 'none' || !param || !param.point || !this.candleSeries) return;
@@ -542,6 +548,7 @@ export class ChartView {
       return;
     }
     const row = this.rowFromParam(param);
+    this.lastHoverRow = row;
     if (!row) {
       this.tooltip.classList.add('hidden');
       return;
