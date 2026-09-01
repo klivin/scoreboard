@@ -112,15 +112,32 @@ export class ChartView {
     return `${y}-${m}-${d}`;
   }
 
+  resetSeriesHandles() {
+    this.candleSeries = null;
+    this.overlaySeries = {};
+    this.volumeSeries = null;
+    this.predictedLines = {};
+    this.priceLines = [];
+    this.trendSeries = [];
+    this.trendAnchor = null;
+    this.markersApi = null;
+    this.cloud = null;
+  }
+
+  destroyChart() {
+    if (this.chart) {
+      try { this.chart.remove(); } catch { /* already removed */ }
+      this.chart = null;
+    }
+    this.resetSeriesHandles();
+  }
+
   showEmpty(message) {
     if (this.emptyEl) {
       this.emptyEl.textContent = message || 'No data to display';
       this.emptyEl.classList.remove('hidden');
     }
-    if (this.chart) {
-      this.chart.remove();
-      this.chart = null;
-    }
+    this.destroyChart();
   }
 
   hideEmpty() {
@@ -185,49 +202,40 @@ export class ChartView {
       lastValueVisible: true,
       priceLineVisible: true,
       priceLineColor: '#667eea',
-      priceLineWidth: 1,
-      priceLineStyle: L.LineStyle.Dotted
+      priceLineWidth: 1
     });
 
     this.cloud = new IchimokuCloudPrimitive();
-    if (this.candleSeries.attachPrimitive) {
-      this.candleSeries.attachPrimitive(this.cloud);
-    }
-
     this.chart.subscribeCrosshairMove((param) => this.onCrosshair(param));
     this.chart.subscribeClick((param) => this.onClick(param));
   }
 
   addLine(id, color, width = 2, dashed = false) {
     const L = this.lwc();
-    const series = this.chart.addSeries(L.LineSeries, {
-      color,
-      lineWidth: width,
-      lineStyle: dashed ? L.LineStyle.Dashed : L.LineStyle.Solid,
-      lastValueVisible: false,
-      priceLineVisible: false,
-      crosshairMarkerVisible: true
-    });
+      const options = { color, lineWidth: width };
+      if (dashed && L.LineStyle && L.LineStyle.Dashed !== undefined) {
+        options.lineStyle = L.LineStyle.Dashed;
+      }
+      const series = this.chart.addSeries(L.LineSeries, options);
     this.overlaySeries[id] = series;
     return series;
   }
 
   applyOverlays() {
     const L = this.lwc();
-    Object.values(this.overlaySeries).forEach((series) => this.chart.removeSeries(series));
     this.overlaySeries = {};
-    if (this.volumeSeries) {
-      this.chart.removeSeries(this.volumeSeries);
-      this.volumeSeries = null;
-    }
-    Object.values(this.predictedLines).forEach((series) => this.chart.removeSeries(series));
+    this.volumeSeries = null;
     this.predictedLines = {};
 
     const line = (id, field, color, dashed = false) => {
       const data = toLineData(this.data, field);
       if (!data.length) return;
-      const series = this.addLine(id, color, 2, dashed);
-      series.setData(data);
+      try {
+        const series = this.addLine(id, color, 2, dashed);
+        series.setData(data);
+      } catch (error) {
+        throw new Error(`${id}: ${error.message || error}`);
+      }
     };
 
     if (this.options.showMA20) line('ma20', 'ma20', '#10b981');
@@ -241,47 +249,60 @@ export class ChartView {
       line('senkouA', 'senkouA', '#10b981', true);
       line('senkouB', 'senkouB', '#ef4444', true);
       line('chikou', 'chikou', '#64748b', true);
-      if (this.cloud) {
-        this.cloud.setSpans(toLineData(this.data, 'senkouA'), toLineData(this.data, 'senkouB'));
-        this.cloud.updateAllViews();
+      if (this.cloud && this.candleSeries && this.candleSeries.attachPrimitive) {
+        try {
+          this.candleSeries.attachPrimitive(this.cloud);
+          this.cloud.setSpans(toLineData(this.data, 'senkouA'), toLineData(this.data, 'senkouB'));
+          this.cloud.updateAllViews();
+        } catch (error) {
+          console.warn('ichimoku cloud skipped', error);
+        }
       }
-    } else if (this.cloud) {
-      this.cloud.setSpans([], []);
-      this.cloud.updateAllViews();
     }
 
     if (this.options.showVolume) {
       const volData = toHistogramData(this.data, 'volume');
       if (volData.length) {
-        this.volumeSeries = this.chart.addSeries(L.HistogramSeries, {
-          color: 'rgba(102, 126, 234, 0.35)',
-          priceFormat: { type: 'volume' },
-          priceScaleId: '',
-          lastValueVisible: false,
-          priceLineVisible: false
-        });
-        this.volumeSeries.priceScale().applyOptions({
-          scaleMargins: { top: 0.82, bottom: 0 }
-        });
-        this.volumeSeries.setData(volData);
+        try {
+          this.volumeSeries = this.chart.addSeries(L.HistogramSeries, {
+            color: 'rgba(102, 126, 234, 0.35)',
+            priceFormat: { type: 'volume' },
+            lastValueVisible: false,
+            priceLineVisible: false
+          });
+          this.volumeSeries.setData(volData);
+          const volScale = this.volumeSeries.priceScale && this.volumeSeries.priceScale();
+          if (volScale) {
+            volScale.applyOptions({
+              scaleMargins: { top: 0.82, bottom: 0 }
+            });
+          }
+        } catch (error) {
+          throw new Error(`volume: ${error.message || error}`);
+        }
       }
     }
 
     if (this.predictedSeries) {
-      if (this.options.showPredicted && this.predictedSeries.predicted) {
-        const series = this.addLine('predicted', '#9333ea', 2, true);
-        series.setData(predictedToLine(this.predictedSeries.predicted));
-        this.predictedLines.predicted = series;
-      }
-      if (this.options.showActual && this.predictedSeries.actual) {
-        const series = this.addLine('actual', '#10b981', 2, false);
-        series.setData(predictedToLine(this.predictedSeries.actual));
-        this.predictedLines.actual = series;
-      }
-      if (this.options.showNaive && this.predictedSeries.naive) {
-        const series = this.addLine('naive', '#f59e0b', 1, true);
-        series.setData(predictedToLine(this.predictedSeries.naive));
-        this.predictedLines.naive = series;
+      const addPred = (id, points, color, width, dashed) => {
+        const data = predictedToLine(points);
+        if (!data.length) return;
+        const series = this.addLine(id, color, width, dashed);
+        series.setData(data);
+        this.predictedLines[id] = series;
+      };
+      try {
+        if (this.options.showPredicted && this.predictedSeries.predicted) {
+          addPred('predicted', this.predictedSeries.predicted, '#9333ea', 2, true);
+        }
+        if (this.options.showActual && this.predictedSeries.actual) {
+          addPred('actual', this.predictedSeries.actual, '#10b981', 2, false);
+        }
+        if (this.options.showNaive && this.predictedSeries.naive) {
+          addPred('naive', this.predictedSeries.naive, '#f59e0b', 1, true);
+        }
+      } catch (error) {
+        console.warn('predicted overlays skipped', error);
       }
     }
   }
@@ -465,14 +486,7 @@ export class ChartView {
 
     this.hideEmpty();
     this.clearDrawings();
-    if (this.chart) {
-      this.chart.remove();
-      this.chart = null;
-      this.candleSeries = null;
-      this.overlaySeries = {};
-      this.volumeSeries = null;
-      this.predictedLines = {};
-    }
+    this.destroyChart();
 
     const candles = toCandleData(this.data);
     if (!candles.length) {
@@ -480,16 +494,25 @@ export class ChartView {
       return;
     }
 
+    const step = (name, fn) => {
+      try {
+        fn();
+      } catch (error) {
+        console.error('chart render failed at', name, error);
+        this.showEmpty(`${name}: ${error && error.message ? error.message : 'failed'} (candles=${candles.length})`);
+        throw error;
+      }
+    };
+
     try {
-      this.ensureChart();
-      this.candleSeries.setData(candles);
-      this.applyLastPriceMarker();
-      this.applyOverlays();
-      this.applyDefaultViewport();
-      this.resize();
-    } catch (error) {
-      console.error('chart render failed', error);
-      this.showEmpty(error && error.message ? error.message : 'Chart render failed');
+      step('ensureChart', () => this.ensureChart());
+      step('candles', () => this.candleSeries.setData(candles));
+      step('overlays', () => this.applyOverlays());
+      step('marker', () => this.applyLastPriceMarker());
+      step('viewport', () => this.applyDefaultViewport());
+      step('resize', () => this.resize());
+    } catch {
+      /* labeled empty state already set */
     }
   }
 }

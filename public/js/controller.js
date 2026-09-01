@@ -144,12 +144,14 @@ export class AppController {
       this.views.chart.setInterval(interval);
     }
     this.views.chart.setData(data);
+    this.views.chart.setPredictedSeries(null);
 
     try {
       const predictedData = await this.loadPredictedSeries(symbol, interval, 7);
       this.views.chart.setPredictedSeries(predictedData);
     } catch (error) {
       console.warn('Could not load predicted series:', error);
+      this.views.chart.setPredictedSeries(null);
     }
 
     this.syncChartOptionsFromCheckboxes();

@@ -68,7 +68,7 @@ Status key: **open** (not started) | **doing** (in progress) | **done** (shipped
 ## Chart Features
 
 ### Kevin's chart: viewport, zoom, 1h, gaps, overlays, drawing
-**Status:** doing  
+**Status:** done  
 **Request:** Stop rebuilding a custom canvas universe. Use an off-the-shelf chart (TradingView capability is the north star, not a pixel clone). After merge, localhost must work:
 
 1. Default viewport = last few days, not the full history dump

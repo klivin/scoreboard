@@ -498,13 +498,14 @@ After updates, users may need to clear browser cache to see changes. Hard refres
 
 ## Changelog
 
-### In progress (Kevin chart ask)
+### Shipped (Kevin chart ask)
 - Lightweight Charts replaces the custom canvas
 - Default viewport last few days; pan/zoom time axis
-- BTC 1h from OKX 1h file; ETH 1h missing message
+- BTC 1h from `okx_btc_usdt_swap_candles_1h.csv` (`ts_ms` / `datetime_utc`); Load Data plots those candles
+- ETH 1h on-page missing message (no pack; not interpolated; not zeros)
 - Gaps stay gaps; last price marker + line
 - Overlay tooltip; horizontal + trend drawings
-- Status: **doing** until localhost verify (BTC 1h, ETH 1d, ETH 1h missing)
+- Status: **done** — verified on localhost (BTC 1h last few days, ETH 1d, ETH 1h missing)
 
 ### Latest (PR #1, grok-4.6)
 - ✅ Fixed ETH loading (filter `indicators_daily.csv` by `symbol`; no BTC fallback)
@@ -529,5 +530,5 @@ After updates, users may need to clear browser cache to see changes. Hard refres
 ---
 
 **Last Updated:** 2026-09-01  
-**Version:** v1.1 (chart library + 1h/zoom — see feature requests)  
-**Status:** v1 shipped (PR #1). Kevin chart ask logged open.
+**Version:** v1.1 (chart library + 1h/zoom)  
+**Status:** Kevin chart ask done on localhost. Not Pooli.
