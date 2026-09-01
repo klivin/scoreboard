@@ -55,6 +55,8 @@ function makePack({ includeEth = true } = {}) {
     indicators: { data: indicators, missing: false, filename: 'indicators_daily.csv' },
     oi_1h: { data: [], missing: true, filename: 'okx_btc_oi_candles_1h_joined.csv' },
     oi_1d: { data: [], missing: true, filename: 'okx_btc_oi_candles_1d_joined.csv' },
+    oi_swap_1h: { data: [], missing: true, filename: 'okx_btc_usdt_swap_oi_1h.csv' },
+    oi_swap_1d: { data: [], missing: true, filename: 'okx_btc_usdt_swap_oi_1d.csv' },
     candles_1h: { data: [], missing: true, filename: 'okx_btc_usdt_swap_candles_1h.csv' },
     candles_1d: { data: [], missing: true, filename: 'okx_btc_usdt_swap_candles_1d.csv' },
     etf_btc: { data: [], missing: true },
@@ -202,4 +204,47 @@ test('available symbols come from the pack, not a hardcoded BTC-only list', () =
   const model = new SeriesModel();
   model.replaceData(makePack());
   assert.deepStrictEqual(model.getAvailableSymbols(), ['BTC', 'ETH']);
+});
+
+test('getSeries attaches ETF millions and OI contracts, never oi_usd on the row', () => {
+  const model = new SeriesModel();
+  const pack = makePack();
+  pack.etf_btc = {
+    data: [
+      { date_utc: '2026-08-10', net_flow_usd_millions: 15.2, net_flow_usd: 1.52e7 },
+      { date_utc: '2026-08-09', net_flow_usd_millions: '' }
+    ],
+    missing: false,
+    filename: 'etf_btc_daily_net_flows.csv'
+  };
+  pack.oi_swap_1d = {
+    data: [
+      { date_utc: '2026-08-10', oi: 2.1e6, oi_usd: 2.0e9 }
+    ],
+    missing: false,
+    filename: 'okx_btc_usdt_swap_oi_1d.csv'
+  };
+  model.replaceData(pack);
+  const btc = model.getSeries('BTC', '1d');
+  const last = btc[btc.length - 1];
+  assert.strictEqual(last.etf_net_flow_usd_millions, 15.2);
+  assert.strictEqual(last.oi, 2.1e6);
+  assert.ok(last.oi < 1e8, 'OI must be contracts, not oi_usd');
+  const blankEtf = btc.find((row) => row.timestamp === Date.parse('2026-08-09T00:00:00Z'));
+  if (blankEtf) {
+    assert.strictEqual(blankEtf.etf_net_flow_usd_millions, null);
+  }
+});
+
+test('ETH series does not inherit BTC open interest', () => {
+  const model = new SeriesModel();
+  const pack = makePack();
+  pack.oi_swap_1d = {
+    data: [{ date_utc: '2026-08-10', oi: 2.1e6, oi_usd: 2e9 }],
+    missing: false,
+    filename: 'okx_btc_usdt_swap_oi_1d.csv'
+  };
+  model.replaceData(pack);
+  const eth = model.getSeries('ETH', '1d');
+  assert.ok(eth.every((row) => row.oi == null));
 });

@@ -51,14 +51,19 @@ export function toLineData(rows, field) {
   return dedupeSorted(points);
 }
 
-export function toHistogramData(rows, field = 'volume') {
+export function toHistogramData(rows, field = 'volume', colorForRow = null) {
   const points = [];
   for (const row of rows || []) {
     if (!row || !Number.isFinite(row.timestamp)) continue;
     const time = toUtcSeconds(row.timestamp);
     const value = row[field];
     if (!Number.isFinite(value)) continue;
-    points.push({ time, value });
+    const point = { time, value };
+    if (typeof colorForRow === 'function') {
+      const color = colorForRow(row, value);
+      if (color) point.color = color;
+    }
+    points.push(point);
   }
   return dedupeSorted(points);
 }

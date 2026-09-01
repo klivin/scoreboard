@@ -1,26 +1,22 @@
 import { lastKnownRow, toCandleData, toLineData, toHistogramData, timeKey, predictedToLine } from './chart-data.js';
 import { IchimokuCloudPrimitive } from './ichimoku-cloud.js';
+import {
+  OVERLAY_PANE_SCALES,
+  PRICE_PANE_INDEX,
+  chartWrapHeight,
+  overlaySeriesDefaults,
+  paneStretchFactor
+} from './chart-panes.js';
+import { buildTooltipLines, formatPrice as formatPriceLabel } from './chart-tooltip.js';
 
 const DEFAULT_VIEWPORT_DAYS = 5;
-
-const OVERLAY_META = {
-  ma20: { option: 'showMA20', color: '#10b981', label: 'MA20 (EMA)' },
-  ma50: { option: 'showMA50', color: '#f59e0b', label: 'MA50 (SMA)' },
-  ma100: { option: 'showMA100', color: '#ef4444', label: 'MA100 (SMA)' },
-  ma200: { option: 'showMA200', color: '#8b5cf6', label: 'MA200 (SMA)' },
-  tenkan: { option: 'showIchimoku', color: '#06b6d4', label: 'Tenkan' },
-  kijun: { option: 'showIchimoku', color: '#ec4899', label: 'Kijun' },
-  senkouA: { option: 'showIchimoku', color: '#10b981', label: 'Senkou A' },
-  senkouB: { option: 'showIchimoku', color: '#ef4444', label: 'Senkou B' },
-  chikou: { option: 'showIchimoku', color: '#64748b', label: 'Chikou' },
-  volume: { option: 'showVolume', color: '#667eea', label: 'Volume' }
-};
 
 export class ChartView {
   constructor(containerId) {
     this.container = document.getElementById(containerId);
     this.tooltip = document.getElementById('chart-tooltip');
     this.emptyEl = document.getElementById('chart-empty');
+    this.dayStrip = document.getElementById('chart-day-strip');
     this.data = null;
     this.predictedSeries = null;
     this.interval = '1d';
@@ -43,6 +39,8 @@ export class ChartView {
       showMA200: false,
       showIchimoku: false,
       showVolume: true,
+      showEtf: false,
+      showOi: false,
       showPredicted: false,
       showActual: false,
       showNaive: true
@@ -92,11 +90,7 @@ export class ChartView {
   }
 
   formatPrice(price) {
-    if (!Number.isFinite(price)) return '';
-    const abs = Math.abs(price);
-    if (abs >= 1000) return price.toFixed(0);
-    if (abs >= 1) return price.toFixed(2);
-    return price.toFixed(6);
+    return formatPriceLabel(price);
   }
 
   formatTime(timestamp) {
@@ -116,6 +110,8 @@ export class ChartView {
     this.candleSeries = null;
     this.overlaySeries = {};
     this.volumeSeries = null;
+    this.etfSeries = null;
+    this.oiSeries = null;
     this.predictedLines = {};
     this.priceLines = [];
     this.trendSeries = [];
@@ -170,6 +166,7 @@ export class ChartView {
       },
       rightPriceScale: {
         borderColor: '#ddd',
+        autoScale: true,
         scaleMargins: { top: 0.08, bottom: 0.08 }
       },
       timeScale: {
@@ -202,21 +199,53 @@ export class ChartView {
       lastValueVisible: true,
       priceLineVisible: true,
       priceLineColor: '#667eea',
-      priceLineWidth: 1
-    });
+      priceLineWidth: 1,
+      priceScaleId: 'right'
+    }, PRICE_PANE_INDEX);
 
     this.cloud = new IchimokuCloudPrimitive();
     this.chart.subscribeCrosshairMove((param) => this.onCrosshair(param));
     this.chart.subscribeClick((param) => this.onClick(param));
   }
 
-  addLine(id, color, width = 2, dashed = false) {
+  addLine(id, color, width = 2, dashed = false, paneIndex = PRICE_PANE_INDEX) {
     const L = this.lwc();
-      const options = { color, lineWidth: width };
-      if (dashed && L.LineStyle && L.LineStyle.Dashed !== undefined) {
-        options.lineStyle = L.LineStyle.Dashed;
+    const options = { color, lineWidth: width };
+    if (dashed && L.LineStyle && L.LineStyle.Dashed !== undefined) {
+      options.lineStyle = L.LineStyle.Dashed;
+    }
+    const series = this.chart.addSeries(L.LineSeries, options, paneIndex);
+    this.overlaySeries[id] = series;
+    return series;
+  }
+
+  applyChartHeight() {
+    const wrap = document.getElementById('chart-wrap');
+    if (wrap) {
+      wrap.style.height = `${chartWrapHeight(this.options)}px`;
+    }
+  }
+
+  applyPaneStretch() {
+    if (!this.chart || typeof this.chart.panes !== 'function') return;
+    const panes = this.chart.panes();
+    panes.forEach((pane, index) => {
+      if (pane && typeof pane.setStretchFactor === 'function') {
+        pane.setStretchFactor(paneStretchFactor(index));
       }
-      const series = this.chart.addSeries(L.LineSeries, options);
+    });
+  }
+
+  addOverlayHistogram(id, field, scaleId, paneIndex, colorForRow, priceFormat) {
+    const L = this.lwc();
+    const data = toHistogramData(this.data, field, colorForRow);
+    if (!data.length) return null;
+    const series = this.chart.addSeries(L.HistogramSeries, {
+      ...overlaySeriesDefaults(scaleId),
+      color: 'rgba(102, 126, 234, 0.45)',
+      priceFormat
+    }, paneIndex);
+    series.setData(data);
     this.overlaySeries[id] = series;
     return series;
   }
@@ -225,13 +254,15 @@ export class ChartView {
     const L = this.lwc();
     this.overlaySeries = {};
     this.volumeSeries = null;
+    this.etfSeries = null;
+    this.oiSeries = null;
     this.predictedLines = {};
 
     const line = (id, field, color, dashed = false) => {
       const data = toLineData(this.data, field);
       if (!data.length) return;
       try {
-        const series = this.addLine(id, color, 2, dashed);
+        const series = this.addLine(id, color, 2, dashed, PRICE_PANE_INDEX);
         series.setData(data);
       } catch (error) {
         throw new Error(`${id}: ${error.message || error}`);
@@ -260,34 +291,11 @@ export class ChartView {
       }
     }
 
-    if (this.options.showVolume) {
-      const volData = toHistogramData(this.data, 'volume');
-      if (volData.length) {
-        try {
-          this.volumeSeries = this.chart.addSeries(L.HistogramSeries, {
-            color: 'rgba(102, 126, 234, 0.35)',
-            priceFormat: { type: 'volume' },
-            lastValueVisible: false,
-            priceLineVisible: false
-          });
-          this.volumeSeries.setData(volData);
-          const volScale = this.volumeSeries.priceScale && this.volumeSeries.priceScale();
-          if (volScale) {
-            volScale.applyOptions({
-              scaleMargins: { top: 0.82, bottom: 0 }
-            });
-          }
-        } catch (error) {
-          throw new Error(`volume: ${error.message || error}`);
-        }
-      }
-    }
-
     if (this.predictedSeries) {
       const addPred = (id, points, color, width, dashed) => {
         const data = predictedToLine(points);
         if (!data.length) return;
-        const series = this.addLine(id, color, width, dashed);
+        const series = this.addLine(id, color, width, dashed, PRICE_PANE_INDEX);
         series.setData(data);
         this.predictedLines[id] = series;
       };
@@ -305,6 +313,70 @@ export class ChartView {
         console.warn('predicted overlays skipped', error);
       }
     }
+
+    let paneIndex = 1;
+
+    if (this.options.showVolume) {
+      try {
+        this.volumeSeries = this.addOverlayHistogram(
+          'volume',
+          'volume',
+          OVERLAY_PANE_SCALES.volume,
+          paneIndex,
+          (row) => (
+            Number.isFinite(row.close) && Number.isFinite(row.open) && row.close >= row.open
+              ? 'rgba(16, 185, 129, 0.5)'
+              : 'rgba(239, 68, 68, 0.5)'
+          ),
+          { type: 'volume' }
+        );
+        if (this.volumeSeries) paneIndex += 1;
+      } catch (error) {
+        throw new Error(`volume: ${error.message || error}`);
+      }
+    }
+
+    if (this.options.showEtf) {
+      try {
+        this.etfSeries = this.addOverlayHistogram(
+          'etf',
+          'etf_net_flow_usd_millions',
+          OVERLAY_PANE_SCALES.etf,
+          paneIndex,
+          (_row, value) => (
+            value >= 0 ? 'rgba(16, 185, 129, 0.55)' : 'rgba(239, 68, 68, 0.55)'
+          ),
+          {
+            type: 'custom',
+            minMove: 0.1,
+            formatter: (value) => `${Number(value).toFixed(1)}M`
+          }
+        );
+        if (this.etfSeries) paneIndex += 1;
+      } catch (error) {
+        throw new Error(`etf: ${error.message || error}`);
+      }
+    }
+
+    if (this.options.showOi) {
+      const oiData = toLineData(this.data, 'oi');
+      if (oiData.length) {
+        try {
+          this.oiSeries = this.chart.addSeries(L.LineSeries, {
+            ...overlaySeriesDefaults(OVERLAY_PANE_SCALES.oi),
+            color: '#0ea5e9',
+            lineWidth: 2,
+            priceFormat: { type: 'volume' }
+          }, paneIndex);
+          this.oiSeries.setData(oiData);
+          paneIndex += 1;
+        } catch (error) {
+          throw new Error(`oi: ${error.message || error}`);
+        }
+      }
+    }
+
+    this.applyPaneStretch();
   }
 
   applyLastPriceMarker() {
@@ -378,7 +450,31 @@ export class ChartView {
     this.trendAnchor = null;
   }
 
+  rowFromParam(param) {
+    if (!param || param.time == null) return null;
+    const key = timeKey(param.time);
+    if (key == null) return null;
+    return this.rowByTime.get(key) || null;
+  }
+
+  updateDayStrip(row) {
+    if (!this.dayStrip) return;
+    if (!row) {
+      this.dayStrip.classList.add('hidden');
+      this.dayStrip.innerHTML = '';
+      return;
+    }
+    const lines = buildTooltipLines(row, this.options, this.interval);
+    this.dayStrip.innerHTML = `<div class="day-strip-title">Day detail</div>${
+      lines.map((line) => `<div>${line}</div>`).join('')
+    }`;
+    this.dayStrip.classList.remove('hidden');
+  }
+
   onClick(param) {
+    const row = this.rowFromParam(param);
+    if (row) this.updateDayStrip(row);
+
     if (this.drawMode === 'none' || !param || !param.point || !this.candleSeries) return;
     const L = this.lwc();
     const price = this.candleSeries.coordinateToPrice(param.point.y);
@@ -429,30 +525,13 @@ export class ChartView {
       this.tooltip.classList.add('hidden');
       return;
     }
-    const key = timeKey(param.time);
-    const row = this.rowByTime.get(key);
+    const row = this.rowFromParam(param);
     if (!row) {
       this.tooltip.classList.add('hidden');
       return;
     }
 
-    const lines = [`${this.formatTime(row.timestamp)}`];
-    if (Number.isFinite(row.close)) lines.push(`Price: $${this.formatPrice(row.close)}`);
-    else lines.push('Price: gap (no print)');
-
-    for (const [field, meta] of Object.entries(OVERLAY_META)) {
-      if (!this.options[meta.option]) continue;
-      if (field === 'volume') {
-        if (Number.isFinite(row.volume)) {
-          lines.push(`${meta.label}: ${row.volume >= 1e6 ? `${(row.volume / 1e6).toFixed(2)}M` : row.volume.toFixed(2)}`);
-        }
-        continue;
-      }
-      if (Number.isFinite(row[field])) {
-        lines.push(`${meta.label}: $${this.formatPrice(row[field])}`);
-      }
-    }
-
+    const lines = buildTooltipLines(row, this.options, this.interval);
     this.tooltip.innerHTML = lines.map((line) => `<div>${line}</div>`).join('');
     this.tooltip.classList.remove('hidden');
 
@@ -487,6 +566,7 @@ export class ChartView {
     this.hideEmpty();
     this.clearDrawings();
     this.destroyChart();
+    this.applyChartHeight();
 
     const candles = toCandleData(this.data);
     if (!candles.length) {

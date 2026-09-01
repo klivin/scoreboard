@@ -33,6 +33,18 @@ export function parseUtcTimestamp(dateUtc, fallback = null) {
       if (!Number.isNaN(ms)) return ms;
     }
 
+    const monthName = text.match(/^(\d{1,2})\s+([A-Za-z]{3,})\s+(\d{4})$/);
+    if (monthName) {
+      const months = {
+        jan: 0, feb: 1, mar: 2, apr: 3, may: 4, jun: 5,
+        jul: 6, aug: 7, sep: 8, oct: 9, nov: 10, dec: 11
+      };
+      const month = months[monthName[2].slice(0, 3).toLowerCase()];
+      if (month != null) {
+        return Date.UTC(Number(monthName[3]), month, Number(monthName[1]));
+      }
+    }
+
     if (/^\d+(\.\d+)?$/.test(text)) {
       const n = Number(text);
       if (n > 1e12) return n;
