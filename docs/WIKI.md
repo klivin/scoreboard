@@ -6,6 +6,7 @@ Scoreboard is a crypto market analysis and forecasting dashboard built with vani
 
 **Stack:**
 - Frontend: Vanilla HTML/CSS/JavaScript (MVC pattern, no React)
+- Chart: TradingView Lightweight Charts (see Chart Library below)
 - Backend: Node.js + Express
 - Storage: Local JSON files (Firestore-ready via adapter)
 - Testing: Node.js native test runner
@@ -26,8 +27,8 @@ Scoreboard is a crypto market analysis and forecasting dashboard built with vani
 - `store.js` - Local JSON storage (forecasts, errors, universe)
 - `store-adapter.js` - Abstraction layer for local/Firestore backends
 
-**View** (`public/js/view.js`)
-- `ChartView` - Canvas-based price chart with overlays
+**View** (`public/js/view.js`, `public/js/chart-view.js`)
+- `ChartView` - Lightweight Charts price chart (pan/zoom, overlays, drawings)
 - `StatsView` - Statistics cards
 - `SignalsView` - Market signals (ETF flows, OI, ratios)
 - `ForecastView` - Forecast cards with steelman analysis
@@ -124,11 +125,40 @@ getSeries(symbol, interval) {
 
 ---
 
+## Chart Library
+
+**Pick: TradingView Lightweight Charts (Apache-2.0), vendored via npm and served from `/vendor/lightweight-charts`.**
+
+**Why this, not a custom canvas:**
+- v1's HiDPI canvas could draw lines but could not grow toward TradingView (pan/zoom time axis, pinch, last-value line, whitespace gaps, primitives) without rebuilding a charting engine.
+- Lightweight Charts is TradingView's open-source path. Same interaction model Kevin asked for (Yahoo / CoinMarketCap: scroll to pan, wheel/pinch to zoom the time axis).
+- Native last-value price line, series markers, crosshair subscription, multi-pane volume, whitespace points (missing readings stay gaps — no drop to 0).
+- Room to grow: primitives (drawings), extra panes, more series types.
+
+**Why not TradingView Charting Library:** no license exists in this repo. Do not pirate it.
+
+**Why not klinecharts (this pass):** built-in drawings are nice, but Lightweight Charts is the usual OSS path, better maintained, and closer to the TradingView north star. Revisit if we need a full drawing toolbox before primitives land.
+
+**TradingView is the north star, not a pixel clone.** This PR ships: default last-few-days viewport, pan/zoom, real 1h BTC, on-page missing 1h, gaps-as-gaps, last-price marker + line, overlay tooltip, horizontal + trend drawings.
+
+### Chart plan (do not fake as shipped)
+
+| Item | Status | Notes |
+|---|---|---|
+| Horizontal + trend lines | this PR | Click-to-place after zoom exists |
+| Rays / extended lines | planned | Same primitive, one-sided extend |
+| Channels / parallel | planned | Two trend lines + fill |
+| Fib / pitchfork | planned | Measure from two or three anchors |
+| Copy items / patterns | planned | Duplicate selected drawing; save/load a pattern pack (JSON). Not in this PR. |
+| Full Charting Library UI | blocked | Needs a real TradingView license |
+
+---
+
 ## Chart Overlays
 
-### Price Line
-- Blue (#667eea) main price line
-- Draws `close` values from data
+### Price
+- Candlesticks (Lightweight Charts). Last known close gets a marker + last-value line.
+- Missing OHLC is whitespace, never a 0 print.
 
 ### Moving Averages
 - **MA20** (green #10b981) - EMA 20-period, default ON
@@ -160,23 +190,21 @@ Loaded from `indicators_daily.csv` columns: `tenkan, kijun, senkou_a, senkou_b, 
 - Separate toggleable series
 - Naive default ON (always visible for comparison)
 
-### HiDPI Rendering
-```javascript
-// public/js/view.js
-setupCanvas() {
-  const dpr = window.devicePixelRatio || 1;
-  canvas.width = rect.width * dpr;
-  canvas.height = rect.height * dpr;
-  ctx.scale(dpr, dpr);
-}
-```
-
-Crisp rendering on all displays (Retina, 4K, standard).
+### Viewport and zoom
+- **Default viewport:** last few days (`src/model/viewport.js`), not `fitContent()` on the full dump
+- **Pan:** drag / horizontal scroll
+- **Zoom:** mouse wheel and pinch on the time axis
+- **Fit all** is a control, not the default
 
 ### Interactivity
-- **Hover crosshair** - Vertical/horizontal lines follow mouse
-- **Tooltip** - Shows date, close, OI, volume, MAs at cursor position
-- **Toggles** - All checkboxes wired to redraw chart immediately
+- **Crosshair + tooltip** - Price and every selected overlay (MA20/50/100/200, Ichimoku, volume) at that timestamp
+- **Toggles** - Checkboxes add/remove Lightweight Charts series
+- **Drawings** - Horizontal line and trend line once a series is on screen
+
+### Gaps
+- Blank / missing readings stay `null`. Never coerced to 0.
+- Chart points use Lightweight Charts whitespace (`{ time }` with no value).
+- Last ETH close in `indicators_daily.csv` can be blank — gap, not a plunge to 0.
 
 ---
 
@@ -311,10 +339,11 @@ All endpoints support symbol parameter for multi-asset queries. Returns JSON by 
 - **Missing:** Aggregated OI across exchanges
 - **Workaround:** Use BTC-specific OI files for OI analysis
 
-### Hourly Data Limited
-- **1h data:** Only available for BTC (OKX files)
-- **Other symbols:** Only daily data in `indicators_daily.csv`
-- **Impact:** 1h interval selector only works for BTC
+### Hourly Data Limited (verified hypothesis)
+- **1h data that exists:** BTC only, from `okx_btc_usdt_swap_candles_1h.csv` (~1700 bars, columns `ts_ms`, `datetime_utc`, ohlcv) plus optional joined OI.
+- **1h data that does not exist:** ETH and other alts. Overlay / repo CSVs for alts are `indicators_daily.csv` (daily). There is no ETH 1h pack file.
+- **Required behavior:** BTC 1h charts from the OKX 1h file. ETH 1h shows an on-page missing message. Do not interpolate daily into 1h. Do not plot zeros.
+- **Impact:** 1h interval selector only has pack rows for BTC.
 
 ### Historical Depth
 - **Pack scope:** Dataset time range determined by Flow pack
@@ -457,7 +486,26 @@ After updates, users may need to clear browser cache to see changes. Hard refres
 
 ---
 
+### BTC 1h shows "No data to display" (loader bug)
+- **Cause (main before this PR):** Pack file was found, but rows used `ts_ms` / `datetime_utc`. The mapper only read `date_utc` / `timestamp` / `ts`, so every timestamp was null, the range filter dropped all ~1700 bars, and the API returned `data: []`. The UI then painted "No data to display" instead of candles. A joined OI CSV was also preferred over `okx_btc_usdt_swap_candles_1h.csv`.
+- **Fix:** BTC 1h always maps `okx_btc_usdt_swap_candles_1h.csv` via `ts_ms` then `datetime_utc`. Joined OI is not the price series. Overlay search includes `/workspace/scoreboard/`, `/workspace/scoreboard/data/`, and repo `data/`. Load Data re-reads the pack from disk.
+
+### ETH 1h shows zeros or daily ETH
+- **Cause:** Daily `indicators_daily.csv` reused for 1h, or blank close coerced to 0
+- **Fix:** Interval `1h` only reads OKX 1h files (BTC). Missing symbol+interval is an on-page 404. Nulls stay null.
+
+---
+
 ## Changelog
+
+### Shipped (Kevin chart ask)
+- Lightweight Charts replaces the custom canvas
+- Default viewport last few days; pan/zoom time axis
+- BTC 1h from `okx_btc_usdt_swap_candles_1h.csv` (`ts_ms` / `datetime_utc`); Load Data plots those candles
+- ETH 1h on-page missing message (no pack; not interpolated; not zeros)
+- Gaps stay gaps; last price marker + line
+- Overlay tooltip; horizontal + trend drawings
+- Status: **done** — verified on localhost (BTC 1h last few days, ETH 1d, ETH 1h missing)
 
 ### Latest (PR #1, grok-4.6)
 - ✅ Fixed ETH loading (filter `indicators_daily.csv` by `symbol`; no BTC fallback)
@@ -481,6 +529,6 @@ After updates, users may need to clear browser cache to see changes. Hard refres
 
 ---
 
-**Last Updated:** 2026-08-31  
-**Version:** v1.0  
-**Status:** Production-ready with known gaps documented
+**Last Updated:** 2026-09-01  
+**Version:** v1.1 (chart library + 1h/zoom)  
+**Status:** Kevin chart ask done on localhost. Not Pooli.

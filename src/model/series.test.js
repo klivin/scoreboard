@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert';
-import { SeriesModel, filterRowsBySymbol, mapIndicatorRow } from './series.js';
+import { SeriesModel, filterRowsBySymbol, mapIndicatorRow, normalizeCandleRow, missingSeriesMessage } from './series.js';
+import { parseCSV } from './ingest.js';
 import { formatUtcTick } from './dates.js';
 
 function makePack({ includeEth = true } = {}) {
@@ -98,7 +99,77 @@ test('missing symbol does not silently return BTC', () => {
 test('ETH 1h does not reuse daily ETH or BTC', () => {
   const model = new SeriesModel();
   model.replaceData(makePack());
-  assert.throws(() => model.getSeries('ETH', '1h'), /No data available for ETH 1h/);
+  assert.throws(() => model.getSeries('ETH', '1h'), /No 1h series for ETH/);
+  assert.match(missingSeriesMessage('ETH', '1h'), /not interpolated/);
+});
+
+test('blank ETH close stays a gap, never 0', () => {
+  const mapped = mapIndicatorRow({
+    date_utc: '2026-08-31',
+    symbol: 'ETH',
+    open: 3900, high: 3950, low: 3880, close: '', volume: 10
+  });
+  assert.strictEqual(mapped.close, null);
+  assert.notStrictEqual(mapped.close, 0);
+});
+
+test('BTC 1h loader uses pack candles file columns only (Kevin no-data bug)', () => {
+  const csv = [
+    'ts_ms,datetime_utc,open,high,low,close,volume',
+    '1722470400000,2024-08-01 00:00:00,64000,64100,63900,64050,11',
+    '1722474000000,2024-08-01 01:00:00,64050,64200,64000,64120,12'
+  ].join('\n');
+  const parsed = parseCSV(csv);
+  const joinedJunk = parseCSV('date_utc,oi\n2024-08-01,1\n');
+  const model = new SeriesModel();
+  model.replaceData({
+    ...makePack(),
+    candles_1h: { data: parsed, missing: false, filename: 'okx_btc_usdt_swap_candles_1h.csv' },
+    oi_1h: { data: joinedJunk, missing: false, filename: 'okx_btc_oi_candles_1h_joined.csv' }
+  });
+  const series = model.getSeries('BTC', '1h');
+  assert.strictEqual(series.length, 2);
+  assert.strictEqual(series[0].timestamp, 1722470400000);
+  assert.strictEqual(series[0].close, 64050);
+  assert.ok(series.every((row) => row.close !== 0 || row.close === 64050 || row.close === 64120));
+});
+
+test('BTC 1h charts from OKX ts_ms/datetime_utc candles, not daily indicators', () => {
+  const hour = 3600000;
+  const start = Date.parse('2026-08-30T00:00:00Z');
+  const candles = Array.from({ length: 12 }, (_, i) => ({
+    ts_ms: start + i * hour,
+    datetime_utc: new Date(start + i * hour).toISOString(),
+    open: 64000 + i,
+    high: 64100 + i,
+    low: 63900 + i,
+    close: 64050 + i,
+    volume: 100 + i
+  }));
+  const model = new SeriesModel();
+  const pack = makePack();
+  pack.candles_1h = { data: candles, missing: false, filename: 'okx_btc_usdt_swap_candles_1h.csv' };
+  model.replaceData(pack);
+
+  const btc1h = model.getSeries('BTC', '1h');
+  assert.strictEqual(btc1h.length, 12);
+  assert.strictEqual(btc1h[0].timestamp, start);
+  assert.ok(btc1h[0].close > 60000);
+
+  assert.throws(() => model.getSeries('ETH', '1h'), /No 1h series for ETH/);
+  const eth1d = model.getSeries('ETH', '1d');
+  assert.ok(eth1d[0].close < 10000);
+});
+
+test('normalizeCandleRow reads ts_ms and datetime_utc', () => {
+  const ts = 1722470400000;
+  const row = normalizeCandleRow({
+    ts_ms: ts,
+    datetime_utc: '2024-08-01 00:00:00',
+    open: 1, high: 2, low: 0.5, close: 1.5, volume: 9
+  });
+  assert.strictEqual(row.timestamp, ts);
+  assert.strictEqual(row.close, 1.5);
 });
 
 test('x-axis timestamps are distinct UTC dates', () => {

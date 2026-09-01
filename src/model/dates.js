@@ -1,3 +1,16 @@
+export function firstRowTimestamp(row) {
+  if (!row || typeof row !== 'object') return null;
+  const lower = {};
+  for (const [key, value] of Object.entries(row)) {
+    lower[String(key).toLowerCase()] = value;
+  }
+  const datetime = lower.datetime_utc ?? lower.date_utc ?? lower.datetime ?? lower.date;
+  const numeric = lower.ts_ms ?? lower.timestamp ?? lower.ts ?? lower.time ?? lower.t;
+  const fromMs = parseUtcTimestamp(null, numeric);
+  if (fromMs != null) return fromMs;
+  return parseUtcTimestamp(datetime, null);
+}
+
 export function parseUtcTimestamp(dateUtc, fallback = null) {
   if (dateUtc !== undefined && dateUtc !== null && dateUtc !== '') {
     if (typeof dateUtc === 'number' && Number.isFinite(dateUtc)) {

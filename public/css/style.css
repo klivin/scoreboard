@@ -164,13 +164,77 @@ button:hover {
   height: 18px;
 }
 
-#chart {
+.chart-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 12px;
+  align-items: center;
+}
+
+.tool-btn {
+  background: #eef2ff;
+  color: #3730a3;
+  padding: 8px 14px;
+}
+
+.tool-btn.active {
+  background: #667eea;
+  color: white;
+}
+
+#chart-wrap {
+  position: relative;
   width: 100%;
-  height: 500px;
+  height: 520px;
   border: 1px solid #e0e0e0;
   border-radius: 6px;
   background: white;
+}
+
+#chart {
+  width: 100%;
+  height: 100%;
   cursor: crosshair;
+}
+
+#chart.drawing,
+#chart-wrap:has(#chart.drawing) #chart {
+  cursor: crosshair;
+}
+
+.chart-tooltip {
+  position: absolute;
+  z-index: 5;
+  min-width: 180px;
+  max-width: 280px;
+  padding: 8px 10px;
+  background: rgba(255, 255, 255, 0.96);
+  border: 1px solid #666;
+  border-radius: 6px;
+  font-size: 12px;
+  line-height: 1.45;
+  color: #333;
+  pointer-events: none;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
+}
+
+.chart-tooltip.hidden,
+.chart-empty.hidden {
+  display: none;
+}
+
+.chart-empty {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  text-align: center;
+  color: #9f1239;
+  background: rgba(253, 232, 232, 0.92);
+  font-weight: 600;
 }
 
 #signals-container {

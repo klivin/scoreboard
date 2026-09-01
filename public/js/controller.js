@@ -35,6 +35,10 @@ export class AppController {
       throw new Error(result.error || `Failed to load ${symbol} ${interval}`);
     }
 
+    if (!result.data || result.data.length === 0) {
+      throw new Error(result.error || `No data for ${symbol} ${interval}`);
+    }
+
     return result.data;
   }
 
@@ -136,13 +140,18 @@ export class AppController {
 
     const data = await this.loadData(symbol, interval);
 
+    if (this.views.chart.setInterval) {
+      this.views.chart.setInterval(interval);
+    }
     this.views.chart.setData(data);
+    this.views.chart.setPredictedSeries(null);
 
     try {
       const predictedData = await this.loadPredictedSeries(symbol, interval, 7);
       this.views.chart.setPredictedSeries(predictedData);
     } catch (error) {
       console.warn('Could not load predicted series:', error);
+      this.views.chart.setPredictedSeries(null);
     }
 
     this.syncChartOptionsFromCheckboxes();
@@ -192,12 +201,19 @@ export class AppController {
     const interval = this.getSelectedInterval();
 
     this.views.chart.setData(null);
+    if (this.views.chart.setInterval) {
+      this.views.chart.setInterval(interval);
+    }
     this.views.chart.render();
 
     try {
       await this.updateOverview(symbol, interval);
     } catch (error) {
-      this.showPageError(`No data for ${symbol} ${interval}: ${error.message}`);
+      const message = error.message || `No data for ${symbol} ${interval}`;
+      this.showPageError(message);
+      if (this.views.chart.showEmpty) {
+        this.views.chart.showEmpty(message);
+      }
       console.error(error);
     }
   }
@@ -244,6 +260,28 @@ export class AppController {
         this.views.chart.render();
       });
     });
+
+    document.querySelectorAll('[data-draw-mode]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const mode = btn.dataset.drawMode === 'cursor' ? 'none' : btn.dataset.drawMode;
+        this.views.chart.setDrawMode(mode);
+      });
+    });
+
+    const clearDraw = document.getElementById('clear-drawings-btn');
+    if (clearDraw) {
+      clearDraw.addEventListener('click', () => this.views.chart.clearDrawings());
+    }
+
+    const resetView = document.getElementById('reset-viewport-btn');
+    if (resetView) {
+      resetView.addEventListener('click', () => this.views.chart.resetViewport());
+    }
+
+    const fitAll = document.getElementById('fit-all-btn');
+    if (fitAll) {
+      fitAll.addEventListener('click', () => this.views.chart.fitAll());
+    }
 
     document.querySelectorAll('.tab-btn').forEach((btn) => {
       btn.addEventListener('click', async () => {
