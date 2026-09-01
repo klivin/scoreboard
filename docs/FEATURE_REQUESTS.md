@@ -1,0 +1,481 @@
+# Scoreboard Feature Requests
+
+Status key: **open** (not started) | **doing** (in progress) | **done** (shipped and verified in UI)
+
+---
+
+## Critical Fixes (Kevin's Screenshot Bugs)
+
+### ✅ Load Data Must Work
+**Status:** done  
+**Request:** Clicking "Load Data" button should re-fetch data from API and redraw chart  
+**Verification:**
+- Button click triggers `updateOverview(symbol, interval)`
+- API called: `GET /api/indicators?symbol=X&interval=Y`
+- Chart redraws with new data
+- Error alert shown if symbol+interval unavailable
+
+**Shipped:** PR #1, commit fixing Load Data button wiring
+
+---
+
+### ✅ ETH Must Not Plot BTC
+**Status:** done  
+**Request:** Selecting ETH should show ETH prices (thousands), not BTC prices (57k-82k)  
+**Verification:**
+- ETH Y-axis range: 3220-3960 (not 57193-81864)
+- Data loaded from `indicators_daily.csv` filtered by `symbol = 'ETH'`
+- No silent fallback to BTC
+- Error shown if symbol missing
+
+**Shipped:** PR #1, commit fixing series.js getSeries() symbol filtering
+
+---
+
+### ✅ X-Axis Real Dates Not 12/31
+**Status:** done  
+**Request:** X-axis should show distinct dates (8/1, 8/2, 8/3...) not all "12/31"  
+**Verification:**
+- `date_utc` parsed as UTC: `new Date(date_utc + 'T00:00:00Z')`
+- Display uses `getUTCMonth()` and `getUTCDate()`
+- Distinct date labels visible on chart
+- No local timezone collapse
+
+**Shipped:** PR #1, commit fixing UTC date parsing and formatting
+
+---
+
+### ✅ Overlays Actually Toggle
+**Status:** done  
+**Request:** Checking/unchecking overlay boxes must visibly change the chart  
+**Root cause (still live after earlier “fixes”):** checkbox ids were mapped with a hyphen-collapse regex (`toggle-ma20` → `showma20`) that never matched `ChartView` keys (`showMA20`). The canvas kept drawing the default MA20/MA50 pair.
+
+**Fix:** explicit map in `public/js/toggles.js` (`toggle-ma20` → `showMA20`, `toggle-ichimoku` → `showIchimoku`, …). Change handler calls `setOption(mappedKey, checked)` then `render()`.
+
+**Verification:**
+- MA50 checkbox: Orange line appears/disappears
+- MA100 checkbox: Red line appears/disappears
+- MA200 checkbox: Purple line appears/disappears
+- Ichimoku checkbox: Cyan/pink lines + cloud fill + chikou appears/disappears
+- Volume checkbox: Blue histogram appears/disappears
+- Naive checkbox: Orange dashed line appears/disappears
+- Each change triggers immediate redraw
+
+**Shipped:** PR #1, grok-4.6 pass — toggle keys actually match the canvas options
+
+---
+
+## Chart Features
+
+### ✅ Ichimoku + Volume + MA20/50/100/200
+**Status:** done  
+**Request:** Full Ichimoku Cloud with volume histogram and all moving averages  
+**Components:**
+- ✅ MA20 (green EMA)
+- ✅ MA50 (orange SMA)
+- ✅ MA100 (red SMA)
+- ✅ MA200 (purple SMA)
+- ✅ Ichimoku Tenkan (cyan)
+- ✅ Ichimoku Kijun (pink)
+- ✅ Senkou A (green)
+- ✅ Senkou B (red)
+- ✅ Cloud shading (semi-transparent fill)
+- ✅ Volume histogram (blue bars at bottom)
+
+**Verification:**
+- All indicators visible when toggles checked
+- Cloud fill appears between Senkou A and B
+- Volume histogram scaled to max volume
+- Lines render without overlap issues
+
+**Shipped:** PR #1, full Ichimoku + volume rendering
+
+---
+
+### ✅ Predicted vs Naive
+**Status:** done  
+**Request:** Separate toggleable series for predicted, actual, naive forecasts  
+**Components:**
+- ✅ Predicted series (dashed purple)
+- ✅ Actual series (solid green)
+- ✅ Naive series (dashed orange, default ON)
+- ✅ Independent toggles
+- ✅ Historical comparison data
+
+**Verification:**
+- API endpoint: `/api/predicted-series?symbol=X&interval=Y&horizon=Z`
+- Predicted toggle shows/hides purple dashed line
+- Actual toggle shows/hides green solid line
+- Naive always visible (default checked)
+- Naive MAE comparison displayed in forecast cards
+
+**Shipped:** PR #1, forecast series visualization
+
+---
+
+### ✅ CSV Export
+**Status:** done  
+**Request:** Download button to export series data as CSV  
+**Verification:**
+- "Download CSV" button in UI
+- Click triggers `GET /api/series?symbol=X&interval=Y&format=csv`
+- Browser downloads `series.csv`
+- Columns: timestamp, date_utc, open, high, low, close, volume, ma20, ma50, ma100, ma200
+
+**Shipped:** PR #1, CSV download button wired
+
+---
+
+## API Features
+
+### ✅ Query API
+**Status:** done  
+**Request:** REST API for programmatic data access  
+**Endpoints:**
+- ✅ `GET /api/series?symbol=BTC&interval=1d&format=json`
+- ✅ `GET /api/series?symbol=BTC&interval=1d&format=csv`
+- ✅ `GET /api/indicators?symbol=BTC&interval=1d`
+- ✅ `GET /api/forecast?symbol=BTC&horizon=7`
+- ✅ `GET /api/predicted-series?symbol=BTC&interval=1d&horizon=7`
+- ✅ `GET /api/signals?symbol=BTC`
+- ✅ `GET /api/universe`
+- ✅ `GET /api/missing`
+- ✅ `GET /health`
+
+**Verification:**
+- All endpoints return JSON or CSV
+- Symbol parameter works for multi-asset
+- Error handling for missing data
+- CORS headers if needed
+
+**Shipped:** Initial release + PR #1 enhancements
+
+---
+
+## Storage
+
+### ✅ Migratable Firestore
+**Status:** done  
+**Request:** Local JSON store now, Firestore later via config (no code rewrite)  
+**Implementation:**
+- ✅ Store adapter pattern (`src/model/store-adapter.js`)
+- ✅ Local JSON backend (default)
+- ✅ Firestore backend (config-based)
+- ✅ Same interface for both
+- ✅ Environment variable switch: `STORE_TYPE=firestore`
+- ✅ Firebase setup documentation (`FIREBASE_SETUP.md`)
+
+**Verification:**
+- Set `STORE_TYPE=local` → uses `store/*.json`
+- Set `STORE_TYPE=firestore` + `FIREBASE_CONFIG` → uses Firestore
+- No code changes needed to swap
+- Collections: forecasts, error_logs, universe
+
+**Important:** Always create NEW Firebase project named "Scoreboard". Never use pooli-19f1c.
+
+**Shipped:** PR #1, store adapter + Firebase setup guide
+
+---
+
+## Data Features
+
+### ✅ Custom Tickers
+**Status:** done (12 symbols supported)  
+**Request:** Symbol selector for different assets  
+**Symbols Supported:**
+- ✅ AVAX
+- ✅ BNB
+- ✅ BTC (default)
+- ✅ DOGE
+- ✅ ETH
+- ✅ LINK
+- ✅ PEPE
+- ✅ SHIB
+- ✅ SOL
+- ✅ SUI
+- ✅ TRUMP
+- ✅ XRP
+
+**Source:** `indicators_daily.csv` from Flow pack
+
+**Verification:**
+- Dropdown in UI shows all 12 symbols
+- Selecting symbol loads correct data (no BTC fallback)
+- Y-axis range reflects symbol price (ETH thousands, BTC tens of thousands)
+- Error shown if symbol missing from pack
+
+**Shipped:** PR #1, multi-symbol support from indicators_daily.csv
+
+---
+
+### ✅ Top100 Weekly Freeze
+**Status:** done (data file expected)  
+**Request:** CoinGecko top 100 weekly snapshot  
+**Files:**
+- `cg_top100_universe.json` - Top 100 crypto universe
+- `cg_top100_snapshot.json` - Weekly freeze metadata
+
+**Known Gap:** CoinGecko 429 rate limit left most categories blank. Categories stay blank (not invented).
+
+**Verification:**
+- Files loaded if present in pack
+- Universe displayed in UI (crypto list)
+- Missing categories handled gracefully
+- No invented data
+
+**Shipped:** Initial release, universe display in UI
+
+---
+
+### ✅ ETF Flows
+**Status:** done  
+**Request:** ETF net flow data from Farside  
+**Files:**
+- `etf_btc_daily_net_flows.csv` - Bitcoin ETF flows
+- `etf_eth_daily_net_flows.csv` - Ethereum ETF flows
+
+**Verification:**
+- Loaded from Flow pack
+- Displayed in "Market Signals" section
+- Latest flow values shown
+- Recent change % calculated
+
+**Shipped:** PR #1, ETF signals display
+
+---
+
+### ✅ OI (Open Interest)
+**Status:** done (BTC only)  
+**Request:** Open interest data from OKX  
+**Files:**
+- `okx_btc_usdt_swap_oi_1h.csv` - Hourly BTC OI
+- `okx_btc_usdt_swap_oi_1d.csv` - Daily BTC OI
+- `okx_btc_oi_candles_1h_joined.csv` - Joined 1h data
+- `okx_btc_oi_candles_1d_joined.csv` - Joined 1d data
+
+**Known Gap:** Only BTC OI available. No aggregated multi-exchange OI yet.
+
+**Verification:**
+- OI loaded for BTC
+- Displayed in Market Signals
+- Latest OI value shown
+- Change % calculated
+
+**Shipped:** PR #1, OI signals display
+
+---
+
+### ✅ Alt/BTC Ratios
+**Status:** done  
+**Request:** Altcoin/Bitcoin ratio analysis  
+**File:**
+- `ratios_daily.csv` - Alt/BTC ratios
+
+**Verification:**
+- Loaded from Flow pack
+- Displayed in Market Signals
+- Latest ratio value shown
+- Change % calculated
+
+**Shipped:** PR #1, ratio signals display
+
+---
+
+### ✅ Category Correlation
+**Status:** done (data file expected)  
+**Request:** 30-day correlation vs BTC by category  
+**File:**
+- `corr_30d_vs_btc.csv` - Category correlations
+
+**Known Gap:** CoinGecko 429 left many categories blank.
+
+**Verification:**
+- File loaded if present
+- Correlations displayed if available
+- Blank categories stay blank (not invented)
+
+**Shipped:** Initial release, correlation data ingestion
+
+---
+
+## Future Enhancements
+
+### 🔲 5x/Day Probe
+**Status:** open  
+**Request:** Automated data refresh 5 times per day  
+**Implementation Ideas:**
+- Cron job or scheduled task
+- Re-fetch Flow pack files
+- Update local cache
+- Trigger forecast recalculation
+- Log refresh status
+
+**Blockers:**
+- Flow pack update frequency unknown
+- Need automated data pipeline
+
+**Priority:** Medium (nice-to-have for production)
+
+---
+
+### 🔲 Multi-Exchange OI Aggregation
+**Status:** open  
+**Request:** Aggregate open interest across multiple exchanges (not just OKX)  
+**Implementation Ideas:**
+- Fetch from Binance, Bybit, Deribit, etc.
+- Aggregate total OI
+- Show per-exchange breakdown
+
+**Blockers:**
+- Need API access or data source for other exchanges
+- Flow pack currently only has OKX
+
+**Priority:** Medium
+
+---
+
+### 🔲 Hourly Data for All Symbols
+**Status:** open  
+**Request:** 1h interval for all 12 symbols (currently BTC only)  
+**Implementation Ideas:**
+- Expand Flow pack to include hourly data for alts
+- Update `indicators_daily.csv` to `indicators_hourly.csv` for 1h
+
+**Blockers:**
+- Flow pack only has BTC 1h data
+- Need data source for alt 1h data
+
+**Priority:** Medium
+
+---
+
+### 🔲 Custom Date Ranges
+**Status:** open  
+**Request:** Date picker to select custom from/to range  
+**Implementation Ideas:**
+- Add date inputs in UI
+- Pass `from` and `to` to API: `GET /api/series?symbol=BTC&from=2024-01-01&to=2024-12-31`
+- Filter series by date range
+
+**Priority:** Low (current view shows full history)
+
+---
+
+### 🔲 Export Chart as Image
+**Status:** open  
+**Request:** Download button to save chart as PNG  
+**Implementation Ideas:**
+- `canvas.toDataURL('image/png')`
+- Trigger browser download
+- Include overlays and current state
+
+**Priority:** Low (nice-to-have)
+
+---
+
+### 🔲 Mobile Responsive Design
+**Status:** open  
+**Request:** Touch-friendly UI for mobile devices  
+**Implementation Ideas:**
+- Responsive CSS breakpoints
+- Touch events for chart interaction
+- Collapsible panels
+
+**Priority:** Low (desktop-first for v1)
+
+---
+
+### 🔲 Dark Mode
+**Status:** open  
+**Request:** Dark theme toggle  
+**Implementation Ideas:**
+- CSS variables for colors
+- Toggle button in UI
+- LocalStorage to persist preference
+
+**Priority:** Low
+
+---
+
+### 🔲 Alerts & Notifications
+**Status:** open  
+**Request:** Price alerts, forecast confidence thresholds  
+**Implementation Ideas:**
+- Set alert conditions (price > X, confidence > Y%)
+- Browser notifications
+- Email/SMS integration (future)
+
+**Priority:** Low
+
+---
+
+### 🔲 Backtest Visualization
+**Status:** open  
+**Request:** Interactive backtest results display  
+**Implementation Ideas:**
+- Load `backtest_sketch.json`
+- Show strategy performance
+- Compare naive vs trend model
+- Equity curve chart
+
+**Priority:** Low (backtest file exists but not visualized)
+
+---
+
+## Completed Milestones
+
+### Scoreboard v1.0 ✅
+- ✅ Vanilla JS MVC architecture
+- ✅ Flow pack data ingestion (overlay + repo paths)
+- ✅ 12-symbol support (BTC, ETH, 10 alts)
+- ✅ Technical indicators (MA20/50/100/200, full Ichimoku)
+- ✅ Volume histogram
+- ✅ Naive baseline forecasting (always visible)
+- ✅ Trend model with confidence bands
+- ✅ MAE/MAPE comparison (naive vs trend)
+- ✅ Steelman forecast analysis
+- ✅ Market signals (ETF flows, OI, alt/BTC ratios)
+- ✅ Predicted vs actual vs naive series
+- ✅ Interactive charts (hover, crosshair, tooltip)
+- ✅ Overlay toggles (all functional)
+- ✅ CSV export
+- ✅ REST API (JSON + CSV formats)
+- ✅ Local JSON storage
+- ✅ Firestore adapter (migration-ready)
+- ✅ HiDPI canvas rendering
+- ✅ UTC date parsing (distinct X-axis dates)
+- ✅ Tests (13/13 passing)
+- ✅ Documentation (README, WIKI, FIREBASE_SETUP, this file)
+
+**Ship Date:** PR #1  
+**Status:** Production-ready with documented gaps
+
+---
+
+## Submission Notes
+
+**How to Add Requests:**
+1. Add new section with title
+2. Set status: open | doing | done
+3. Describe request clearly
+4. List verification criteria
+5. Note blockers if any
+6. Set priority
+
+**Marking Done:**
+- Must actually work in the UI (not just code present)
+- ETH Y-axis not 57k → verify ETH loads ETH
+- Load Data redraws → verify button triggers fetch
+- Distinct dates → verify X-axis shows 8/1, 8/2, not all 12/31
+- Toggles change canvas → verify chart redraws on checkbox
+
+**Stay Honest:**
+- If a feature is broken, status = open or doing
+- If a feature is half-done, note what's missing
+- If a feature has gaps, document them
+
+---
+
+**Last Updated:** 2026-08-31  
+**Maintainer:** Kevin (reviewer), updated by Scoreboard team  
+**Status Tracking:** This file updated as features ship

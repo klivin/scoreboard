@@ -1,0 +1,9 @@
+node_modules/
+npm-debug.log
+.DS_Store
+.env
+data/*.csv
+data/*.json
+!data/README.md
+store/*.json
+!store/.gitkeep
