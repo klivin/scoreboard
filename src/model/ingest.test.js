@@ -20,3 +20,14 @@ test('parseCSV does not turn empty date cells into 0', () => {
   assert.strictEqual(rows[0].date_utc, null);
   assert.strictEqual(rows[0].symbol, 'ETH');
 });
+
+test('parseCSV keeps OKX 1h ts_ms/datetime_utc rows (does not drop on extra columns)', () => {
+  const rows = parseCSV([
+    'ts_ms,datetime_utc,open,high,low,close,volume,extra',
+    '1722470400000,2024-08-01 00:00:00,64000,64100,63900,64050,12,keep-me'
+  ].join('\n'));
+  assert.strictEqual(rows.length, 1);
+  assert.strictEqual(rows[0].ts_ms, 1722470400000);
+  assert.strictEqual(rows[0].datetime_utc, '2024-08-01 00:00:00');
+  assert.strictEqual(rows[0].close, 64050);
+});

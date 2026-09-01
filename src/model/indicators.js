@@ -8,10 +8,16 @@ export function calculateSMA(data, period, field = 'close') {
     }
     
     let sum = 0;
+    let valid = true;
     for (let j = 0; j < period; j++) {
-      sum += data[i - j][field];
+      const value = data[i - j][field];
+      if (!Number.isFinite(value)) {
+        valid = false;
+        break;
+      }
+      sum += value;
     }
-    result.push(sum / period);
+    result.push(valid ? sum / period : null);
   }
   
   return result;
@@ -26,14 +32,27 @@ export function calculateEMA(data, period, field = 'close') {
     if (ema === null) {
       if (i >= period - 1) {
         let sum = 0;
+        let valid = true;
         for (let j = 0; j < period; j++) {
-          sum += data[i - j][field];
+          const value = data[i - j][field];
+          if (!Number.isFinite(value)) {
+            valid = false;
+            break;
+          }
+          sum += value;
+        }
+        if (!valid) {
+          result.push(null);
+          continue;
         }
         ema = sum / period;
       } else {
         result.push(null);
         continue;
       }
+    } else if (!Number.isFinite(data[i][field])) {
+      result.push(null);
+      continue;
     } else {
       ema = (data[i][field] - ema) * multiplier + ema;
     }
@@ -54,9 +73,10 @@ export function calculateIchimoku(data) {
     let low = Infinity;
     for (let i = start; i <= end; i++) {
       if (i < 0 || i >= data.length) continue;
-      high = Math.max(high, data[i].high);
-      low = Math.min(low, data[i].low);
+      if (Number.isFinite(data[i].high)) high = Math.max(high, data[i].high);
+      if (Number.isFinite(data[i].low)) low = Math.min(low, data[i].low);
     }
+    if (!Number.isFinite(high) || !Number.isFinite(low)) return null;
     return (high + low) / 2;
   };
   

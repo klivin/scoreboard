@@ -1,6 +1,6 @@
 import { loadAllData } from './ingest.js';
 import { addIndicators } from './indicators.js';
-import { parseUtcTimestamp } from './dates.js';
+import { firstRowTimestamp } from './dates.js';
 
 function isBtcSymbol(symbol) {
   const upper = String(symbol || '').toUpperCase();
@@ -23,15 +23,27 @@ export function filterRowsBySymbol(rows, symbol) {
   ));
 }
 
+export function missingSeriesMessage(symbol, interval) {
+  const intervalNorm = interval === '1h' ? '1h' : '1d';
+  const sym = String(symbol || '').toUpperCase();
+  if (intervalNorm === '1h' && !isBtcSymbol(sym)) {
+    return `No 1h series for ${sym}. The Flow pack only includes hourly OKX BTC (okx_btc_usdt_swap_candles_1h.csv). Alt 1h is not in the pack — indicators_daily.csv is daily-only and is not interpolated into 1h. Missing readings are not plotted as 0.`;
+  }
+  if (intervalNorm === '1h' && isBtcSymbol(sym)) {
+    return `No 1h series for BTC. Place okx_btc_usdt_swap_candles_1h.csv in /workspace/scoreboard/ or ./data/.`;
+  }
+  return `No data available for ${sym} ${intervalNorm}`;
+}
+
 export function mapIndicatorRow(row) {
   return {
-    date_utc: row.date_utc || row.date || null,
-    timestamp: parseUtcTimestamp(row.date_utc || row.date, row.timestamp ?? row.ts ?? row.time),
-    open: numeric(row.open, row.o) || 0,
-    high: numeric(row.high, row.h) || 0,
-    low: numeric(row.low, row.l) || 0,
-    close: numeric(row.close, row.c) || 0,
-    volume: numeric(row.volume, row.vol) || 0,
+    date_utc: row.datetime_utc || row.date_utc || row.date || null,
+    timestamp: firstRowTimestamp(row),
+    open: numeric(row.open, row.o),
+    high: numeric(row.high, row.h),
+    low: numeric(row.low, row.l),
+    close: numeric(row.close, row.c),
+    volume: numeric(row.volume, row.vol),
     ma20: numeric(row.ma20),
     ma50: numeric(row.ma50),
     ma100: numeric(row.ma100),
@@ -46,13 +58,13 @@ export function mapIndicatorRow(row) {
 
 export function normalizeCandleRow(row) {
   return {
-    date_utc: row.date_utc || row.date || null,
-    timestamp: parseUtcTimestamp(row.date_utc || row.date, row.timestamp ?? row.ts ?? row.time ?? row.t),
-    open: numeric(row.open, row.o, row.Open) || 0,
-    high: numeric(row.high, row.h, row.High) || 0,
-    low: numeric(row.low, row.l, row.Low) || 0,
-    close: numeric(row.close, row.c, row.Close) || 0,
-    volume: numeric(row.volume, row.vol, row.volCcy, row.Volume) || 0,
+    date_utc: row.datetime_utc || row.date_utc || row.date || null,
+    timestamp: firstRowTimestamp(row),
+    open: numeric(row.open, row.o, row.Open),
+    high: numeric(row.high, row.h, row.High),
+    low: numeric(row.low, row.l, row.Low),
+    close: numeric(row.close, row.c, row.Close),
+    volume: numeric(row.volume, row.vol, row.volCcy, row.Volume),
     oi: numeric(row.oi, row.open_interest, row.openInterest)
   };
 }
@@ -124,12 +136,9 @@ export class SeriesModel {
   }
 
   getBtcCandles(interval) {
-    const key = interval === '1h' ? 'oi_1h' : 'oi_1d';
     const candleKey = interval === '1h' ? 'candles_1h' : 'candles_1d';
-    const primary = this.data[key] && this.data[key].data ? this.data[key].data : [];
-    const fallback = this.data[candleKey] && this.data[candleKey].data ? this.data[candleKey].data : [];
-    const rows = primary.length > 0 ? primary : fallback;
-    return rows.map(normalizeCandleRow);
+    const candles = this.data[candleKey] && this.data[candleKey].data ? this.data[candleKey].data : [];
+    return candles.map(normalizeCandleRow).filter((row) => row && row.timestamp);
   }
 
   getSeries(symbol, interval = '1d', from = null, to = null, fields = null) {
@@ -138,16 +147,19 @@ export class SeriesModel {
     const intervalNorm = interval === '1h' ? '1h' : '1d';
     let series = [];
 
-    if (intervalNorm === '1d') {
+    if (intervalNorm === '1h') {
+      if (isBtcSymbol(symbol)) {
+        series = this.getBtcCandles('1h');
+      }
+    } else {
       series = this.getDailyFromIndicators(symbol);
-    }
-
-    if (series.length === 0 && isBtcSymbol(symbol)) {
-      series = this.getBtcCandles(intervalNorm);
+      if (series.length === 0 && isBtcSymbol(symbol)) {
+        series = this.getBtcCandles('1d');
+      }
     }
 
     if (!series || series.length === 0) {
-      throw new Error(`No data available for ${symbol} ${intervalNorm}`);
+      throw new Error(missingSeriesMessage(symbol, intervalNorm));
     }
 
     return applyRangeAndFields(series, from, to, fields);
@@ -176,13 +188,11 @@ export class SeriesModel {
       }
     }
 
-    if (symbols.size === 0 && isBtcSymbol('BTC')) {
-      const hasBtc = (
-        (this.data.oi_1d && this.data.oi_1d.data && this.data.oi_1d.data.length > 0) ||
-        (this.data.candles_1d && this.data.candles_1d.data && this.data.candles_1d.data.length > 0)
-      );
-      if (hasBtc) symbols.add('BTC');
-    }
+    const hasBtcCandles = (
+      (this.data.candles_1h && this.data.candles_1h.data && this.data.candles_1h.data.length > 0) ||
+      (this.data.candles_1d && this.data.candles_1d.data && this.data.candles_1d.data.length > 0)
+    );
+    if (hasBtcCandles) symbols.add('BTC');
 
     return [...symbols].sort();
   }

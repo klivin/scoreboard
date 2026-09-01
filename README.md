@@ -28,6 +28,7 @@ Crypto market analysis and forecasting dashboard built with vanilla JavaScript M
 
 ### Stack
 - **Frontend**: Vanilla HTML/CSS/JavaScript (MVC pattern)
+- **Chart**: TradingView Lightweight Charts (pan/zoom, gaps, drawings)
 - **Backend**: Node.js + Express
 - **Storage**: Local JSON files (Firestore-ready schema)
 - **Testing**: Node.js native test runner

@@ -486,6 +486,10 @@ After updates, users may need to clear browser cache to see changes. Hard refres
 
 ---
 
+### BTC 1h shows "No data to display" (loader bug)
+- **Cause (main before this PR):** Pack file was found, but rows used `ts_ms` / `datetime_utc`. The mapper only read `date_utc` / `timestamp` / `ts`, so every timestamp was null, the range filter dropped all ~1700 bars, and the API returned `data: []`. The UI then painted "No data to display" instead of candles. A joined OI CSV was also preferred over `okx_btc_usdt_swap_candles_1h.csv`.
+- **Fix:** BTC 1h always maps `okx_btc_usdt_swap_candles_1h.csv` via `ts_ms` then `datetime_utc`. Joined OI is not the price series. Overlay search includes `/workspace/scoreboard/`, `/workspace/scoreboard/data/`, and repo `data/`. Load Data re-reads the pack from disk.
+
 ### ETH 1h shows zeros or daily ETH
 - **Cause:** Daily `indicators_daily.csv` reused for 1h, or blank close coerced to 0
 - **Fix:** Interval `1h` only reads OKX 1h files (BTC). Missing symbol+interval is an on-page 404. Nulls stay null.
@@ -500,6 +504,7 @@ After updates, users may need to clear browser cache to see changes. Hard refres
 - BTC 1h from OKX 1h file; ETH 1h missing message
 - Gaps stay gaps; last price marker + line
 - Overlay tooltip; horizontal + trend drawings
+- Status: **doing** until localhost verify (BTC 1h, ETH 1d, ETH 1h missing)
 
 ### Latest (PR #1, grok-4.6)
 - ✅ Fixed ETH loading (filter `indicators_daily.csv` by `symbol`; no BTC fallback)

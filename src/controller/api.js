@@ -6,6 +6,7 @@ export function handleGetSeries(req, res) {
   const { symbol = 'BTC', interval = '1d', from, to, fields } = req.query;
   
   try {
+    seriesModel.load();
     const series = seriesModel.getSeries(symbol, interval, from, to, fields);
     
     const format = req.query.format || 'json';
@@ -34,8 +35,8 @@ export function handleGetSeries(req, res) {
       });
     }
   } catch (error) {
-    res.status(error.message && error.message.startsWith('No data available') ? 404 : 500)
-      .json({ error: error.message });
+    res.status(error.message && error.message.startsWith('No ') ? 404 : 500)
+      .json({ error: error.message, missing: true });
   }
 }
 
@@ -43,17 +44,18 @@ export function handleGetIndicators(req, res) {
   const { symbol = 'BTC', interval = '1d' } = req.query;
   
   try {
+    seriesModel.load();
     const indicators = seriesModel.getIndicators(symbol, interval);
     
     res.json({
       symbol,
       interval,
       count: indicators.length,
-      data: indicators.slice(-90)
+      data: indicators
     });
   } catch (error) {
-    res.status(error.message && error.message.startsWith('No data available') ? 404 : 500)
-      .json({ error: error.message });
+    res.status(error.message && error.message.startsWith('No ') ? 404 : 500)
+      .json({ error: error.message, missing: true });
   }
 }
 

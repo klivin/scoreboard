@@ -1,7 +1,10 @@
+import { lastKnownClose } from './viewport.js';
+
 export function naiveBaseline(data, horizonDays) {
   if (!data || data.length === 0) return null;
   
-  const lastPrice = data[data.length - 1].close;
+  const lastPrice = lastKnownClose(data);
+  if (!Number.isFinite(lastPrice)) return null;
   
   return {
     method: 'naive',
@@ -49,14 +52,19 @@ export function calculateMAPE(predictions, actuals) {
 
 export function generateForecast(data, horizonDays) {
   const naive = naiveBaseline(data, horizonDays);
+  const lastPrice = lastKnownClose(data);
+  if (!naive || !Number.isFinite(lastPrice)) {
+    throw new Error('No last known price for forecast');
+  }
   
-  const lastPrice = data[data.length - 1].close;
   const ma20 = data[data.length - 1].ma20;
   
   let trend = 0;
   if (data.length >= 7) {
-    const priceSevenDaysAgo = data[data.length - 7].close;
-    trend = (lastPrice - priceSevenDaysAgo) / priceSevenDaysAgo;
+    const priceSevenDaysAgo = lastKnownClose(data.slice(0, data.length - 6));
+    if (Number.isFinite(priceSevenDaysAgo) && priceSevenDaysAgo !== 0) {
+      trend = (lastPrice - priceSevenDaysAgo) / priceSevenDaysAgo;
+    }
   }
   
   const trendAdjustment = lastPrice * trend * (horizonDays / 7);
@@ -86,6 +94,7 @@ function calculateVolatility(data) {
   
   const returns = [];
   for (let i = 1; i < data.length; i++) {
+    if (!Number.isFinite(data[i].close) || !Number.isFinite(data[i - 1].close) || data[i - 1].close === 0) continue;
     const ret = Math.log(data[i].close / data[i - 1].close);
     returns.push(ret);
   }
@@ -133,7 +142,7 @@ export function createForecastCard(symbol, data, horizonDays) {
   const forecast = generateForecast(data, horizonDays);
   const naive = naiveBaseline(data, horizonDays);
   
-  const lastPrice = data[data.length - 1].close;
+  const lastPrice = lastKnownClose(data);
   const side = forecast.prediction > lastPrice ? 'LONG' : 'SHORT';
   const changePercent = ((forecast.prediction - lastPrice) / lastPrice) * 100;
   

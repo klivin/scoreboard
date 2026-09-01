@@ -68,7 +68,7 @@ Status key: **open** (not started) | **doing** (in progress) | **done** (shipped
 ## Chart Features
 
 ### Kevin's chart: viewport, zoom, 1h, gaps, overlays, drawing
-**Status:** open  
+**Status:** doing  
 **Request:** Stop rebuilding a custom canvas universe. Use an off-the-shelf chart (TradingView capability is the north star, not a pixel clone). After merge, localhost must work:
 
 1. Default viewport = last few days, not the full history dump
@@ -79,6 +79,8 @@ Status key: **open** (not started) | **doing** (in progress) | **done** (shipped
 6. Drawing: at least horizontal + trend lines once zoom exists. Advanced lines / copy items / patterns are planned in the wiki, not faked as shipped.
 
 **Library pick:** TradingView Lightweight Charts (Apache-2.0). Charting Library is not licensed in-repo — do not pirate. See `docs/WIKI.md`.
+
+**Loader bug (Kevin, localhost after pull of main):** BTC 1h showed "No data to display" even though `okx_btc_usdt_swap_candles_1h.csv` (~1700 bars) was on disk. Not missing data. Mapper ignored `ts_ms`/`datetime_utc` and preferred a joined/daily CSV. Load Data on BTC+1h must plot those candles.
 
 **Hypothesis to verify (do not invent series):**
 - ETH 1h is empty because overlay CSVs are daily-only and there is no ETH 1h pack file

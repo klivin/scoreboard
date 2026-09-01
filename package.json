@@ -6,14 +6,15 @@
   "type": "module",
   "scripts": {
     "start": "node src/server.js",
-    "test": "node --test src/model/*.test.js src/**/*.test.js public/js/toggles.test.js",
+    "test": "node --test src/model/*.test.js src/**/*.test.js public/js/*.test.js",
     "dev": "node --watch src/server.js"
   },
   "keywords": ["crypto", "forecasting", "analysis"],
   "author": "",
   "license": "MIT",
   "dependencies": {
-    "express": "^4.18.2"
+    "express": "^4.18.2",
+    "lightweight-charts": "^5.0.8"
   },
   "devDependencies": {},
   "engines": {
