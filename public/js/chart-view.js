@@ -140,7 +140,7 @@ export class ChartView {
     this.chart = L.createChart(this.container, {
       autoSize: true,
       layout: {
-        background: { type: L.ColorType.Solid, color: '#ffffff' },
+        background: { type: (L.ColorType && L.ColorType.Solid) || 'solid', color: '#ffffff' },
         textColor: '#444',
         fontSize: 12
       },
@@ -224,8 +224,10 @@ export class ChartView {
     this.predictedLines = {};
 
     const line = (id, field, color, dashed = false) => {
+      const data = toLineData(this.data, field);
+      if (!data.length) return;
       const series = this.addLine(id, color, 2, dashed);
-      series.setData(toLineData(this.data, field));
+      series.setData(data);
     };
 
     if (this.options.showMA20) line('ma20', 'ma20', '#10b981');
@@ -249,15 +251,8 @@ export class ChartView {
     }
 
     if (this.options.showVolume) {
-      try {
-        this.volumeSeries = this.chart.addSeries(L.HistogramSeries, {
-          color: 'rgba(102, 126, 234, 0.45)',
-          priceFormat: { type: 'volume' },
-          priceScaleId: 'vol',
-          lastValueVisible: false,
-          priceLineVisible: false
-        }, 1);
-      } catch {
+      const volData = toHistogramData(this.data, 'volume');
+      if (volData.length) {
         this.volumeSeries = this.chart.addSeries(L.HistogramSeries, {
           color: 'rgba(102, 126, 234, 0.35)',
           priceFormat: { type: 'volume' },
@@ -268,8 +263,8 @@ export class ChartView {
         this.volumeSeries.priceScale().applyOptions({
           scaleMargins: { top: 0.82, bottom: 0 }
         });
+        this.volumeSeries.setData(volData);
       }
-      this.volumeSeries.setData(toHistogramData(this.data, 'volume'));
     }
 
     if (this.predictedSeries) {
@@ -304,10 +299,14 @@ export class ChartView {
       text: this.formatPrice(last.close)
     };
 
-    if (typeof L.createSeriesMarkers === 'function') {
-      this.markersApi = L.createSeriesMarkers(this.candleSeries, [marker]);
-    } else if (this.candleSeries.setMarkers) {
-      this.candleSeries.setMarkers([marker]);
+    try {
+      if (typeof L.createSeriesMarkers === 'function') {
+        this.markersApi = L.createSeriesMarkers(this.candleSeries, [marker]);
+      } else if (this.candleSeries.setMarkers) {
+        this.candleSeries.setMarkers([marker]);
+      }
+    } catch (error) {
+      console.warn('last-price marker skipped', error);
     }
   }
 
@@ -318,13 +317,24 @@ export class ChartView {
       this.chart.timeScale().fitContent();
       return;
     }
-    const to = Math.floor(last.timestamp / 1000);
-    const from = to - DEFAULT_VIEWPORT_DAYS * 86400;
+    const candles = toCandleData(this.data);
+    if (!candles.length) {
+      this.chart.timeScale().fitContent();
+      return;
+    }
+    const lastTime = candles[candles.length - 1].time;
+    const firstTime = candles[0].time;
+    const from = Math.max(firstTime, lastTime - DEFAULT_VIEWPORT_DAYS * 86400);
     this.chart.timeScale().applyOptions({
       timeVisible: this.interval === '1h',
       secondsVisible: false
     });
-    this.chart.timeScale().setVisibleRange({ from, to });
+    try {
+      this.chart.timeScale().setVisibleRange({ from, to: lastTime });
+    } catch (error) {
+      console.warn('viewport range skipped', error);
+      this.chart.timeScale().fitContent();
+    }
   }
 
   fitAll() {
@@ -464,11 +474,22 @@ export class ChartView {
       this.predictedLines = {};
     }
 
-    this.ensureChart();
-    this.candleSeries.setData(toCandleData(this.data));
-    this.applyLastPriceMarker();
-    this.applyOverlays();
-    this.applyDefaultViewport();
-    this.resize();
+    const candles = toCandleData(this.data);
+    if (!candles.length) {
+      this.showEmpty('No plotted candles (missing readings stay gaps, not zeros).');
+      return;
+    }
+
+    try {
+      this.ensureChart();
+      this.candleSeries.setData(candles);
+      this.applyLastPriceMarker();
+      this.applyOverlays();
+      this.applyDefaultViewport();
+      this.resize();
+    } catch (error) {
+      console.error('chart render failed', error);
+      this.showEmpty(error && error.message ? error.message : 'Chart render failed');
+    }
   }
 }

@@ -18,7 +18,6 @@ export function toCandleData(rows) {
     const time = toUtcSeconds(row.timestamp);
     const valid = [row.open, row.high, row.low, row.close].every(Number.isFinite);
     if (!valid) {
-      points.push({ time });
       continue;
     }
     points.push({
@@ -38,10 +37,7 @@ export function toLineData(rows, field) {
     if (!row || !Number.isFinite(row.timestamp)) continue;
     const time = toUtcSeconds(row.timestamp);
     const value = row[field];
-    if (!Number.isFinite(value)) {
-      points.push({ time });
-      continue;
-    }
+    if (!Number.isFinite(value)) continue;
     points.push({ time, value });
   }
   return dedupeSorted(points);
@@ -53,10 +49,7 @@ export function toHistogramData(rows, field = 'volume') {
     if (!row || !Number.isFinite(row.timestamp)) continue;
     const time = toUtcSeconds(row.timestamp);
     const value = row[field];
-    if (!Number.isFinite(value)) {
-      points.push({ time });
-      continue;
-    }
+    if (!Number.isFinite(value)) continue;
     points.push({ time, value });
   }
   return dedupeSorted(points);

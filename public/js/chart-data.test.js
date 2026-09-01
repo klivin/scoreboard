@@ -7,7 +7,8 @@ test('client candle mapper keeps missing close as a gap', () => {
     { timestamp: Date.parse('2026-08-30T00:00:00Z'), open: 3900, high: 3950, low: 3880, close: 3920 },
     { timestamp: Date.parse('2026-08-31T00:00:00Z'), open: null, high: null, low: null, close: null }
   ]);
-  assert.strictEqual(points[1].close, undefined);
+  assert.strictEqual(points.length, 1);
+  assert.ok(Number.isFinite(points[0].close));
   assert.strictEqual(lastKnownRow([
     { close: 3920 },
     { close: null }
