@@ -67,6 +67,37 @@ Status key: **open** (not started) | **doing** (in progress) | **done** (shipped
 
 ## Chart Features
 
+### Kevin's chart: viewport, zoom, 1h, gaps, overlays, drawing
+**Status:** open  
+**Request:** Stop rebuilding a custom canvas universe. Use an off-the-shelf chart (TradingView capability is the north star, not a pixel clone). After merge, localhost must work:
+
+1. Default viewport = last few days, not the full history dump
+2. Scroll + pinch/wheel zoom like Yahoo Finance / CoinMarketCap (pan/zoom the time axis)
+3. 1-hour series must display for BTC from Flow pack `okx_btc_usdt_swap_candles_1h.csv` (~1700 bars, `ts_ms` / `datetime_utc` / ohlcv). ETH 1h is **not** in the pack (alts are `indicators_daily.csv` only). If 1h is missing for a symbol, show an on-page message. Do **not** interpolate daily into 1h. Do **not** plot zeros.
+4. Never draw a drop to 0 when a reading is missing. Gaps stay gaps. Last known / current price must stand out (marker + last-value line). Last ETH close in `indicators_daily.csv` can be blank — treat as gap, never 0.
+5. Crosshair/tap tooltip shows price + every selected overlay (SMA/EMA 20/50/100/200, Ichimoku, volume) at that timestamp
+6. Drawing: at least horizontal + trend lines once zoom exists. Advanced lines / copy items / patterns are planned in the wiki, not faked as shipped.
+
+**Library pick:** TradingView Lightweight Charts (Apache-2.0). Charting Library is not licensed in-repo — do not pirate. See `docs/WIKI.md`.
+
+**Hypothesis to verify (do not invent series):**
+- ETH 1h is empty because overlay CSVs are daily-only and there is no ETH 1h pack file
+- BTC 1h charts from `okx_btc_usdt_swap_candles_1h.csv`
+
+**Verification (localhost after merge):**
+```
+git pull origin main
+npm start
+# open http://localhost:3000
+# BTC 1h → last few days, real OKX bars, zoom/pan
+# ETH 1d → ETH prices, blank last close is a gap (not 0)
+# ETH 1h → on-page missing message, not zeros
+```
+
+**Status rule:** `open` until work starts, `doing` while implementing, `done` only if the above works on localhost.
+
+---
+
 ### ✅ Ichimoku + Volume + MA20/50/100/200
 **Status:** done  
 **Request:** Full Ichimoku Cloud with volume histogram and all moving averages  
@@ -476,6 +507,6 @@ Status key: **open** (not started) | **doing** (in progress) | **done** (shipped
 
 ---
 
-**Last Updated:** 2026-08-31  
+**Last Updated:** 2026-09-01  
 **Maintainer:** Kevin (reviewer), updated by Scoreboard team  
 **Status Tracking:** This file updated as features ship
