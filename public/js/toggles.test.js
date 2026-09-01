@@ -9,6 +9,8 @@ test('toggle ids map to ChartView option keys (not showma20)', () => {
   assert.strictEqual(optionKeyFromToggleId('toggle-ma200'), 'showMA200');
   assert.strictEqual(optionKeyFromToggleId('toggle-ichimoku'), 'showIchimoku');
   assert.strictEqual(optionKeyFromToggleId('toggle-volume'), 'showVolume');
+  assert.strictEqual(optionKeyFromToggleId('toggle-etf'), 'showEtf');
+  assert.strictEqual(optionKeyFromToggleId('toggle-oi'), 'showOi');
   assert.strictEqual(optionKeyFromToggleId('toggle-predicted'), 'showPredicted');
   assert.strictEqual(optionKeyFromToggleId('toggle-actual'), 'showActual');
   assert.strictEqual(optionKeyFromToggleId('toggle-naive'), 'showNaive');

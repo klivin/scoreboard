@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert';
-import { toCandleData, lastKnownRow } from './chart-data.js';
+import { toCandleData, lastKnownRow, toHistogramData } from './chart-data.js';
 
 test('client candle mapper keeps missing close as a gap', () => {
   const points = toCandleData([
@@ -13,4 +13,14 @@ test('client candle mapper keeps missing close as a gap', () => {
     { close: 3920 },
     { close: null }
   ]).close, 3920);
+});
+
+test('histogram skips blank ETF/volume instead of plotting 0', () => {
+  const points = toHistogramData([
+    { timestamp: Date.parse('2026-08-28T00:00:00Z'), etf_net_flow_usd_millions: 12.4 },
+    { timestamp: Date.parse('2026-08-29T00:00:00Z'), etf_net_flow_usd_millions: null }
+  ], 'etf_net_flow_usd_millions');
+  assert.strictEqual(points.length, 1);
+  assert.strictEqual(points[0].value, 12.4);
+  assert.ok(!points.some((point) => point.value === 0));
 });

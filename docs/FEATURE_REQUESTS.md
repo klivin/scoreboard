@@ -65,6 +65,35 @@ Status key: **open** (not started) | **doing** (in progress) | **done** (shipped
 
 ---
 
+### Price Y-axis crushed by volume / OI / ETF dollars
+**Status:** done  
+**Request:** BTC 1d tooltip shows price ~77822 but the Y-axis goes to 9,000,000,000,000 and price is a flat line at the bottom. Volume checkbox ON. Volume / OI / ETF dollars must never share the price scale with candles.
+
+**Pack magnitudes (do not invent):**
+- candles `volume_base` ~1e4, `volume_quote` ~1e9
+- OI `oi_usd` ~2e9, `oi` contracts ~2e6
+- ETF `net_flow_usd_millions` ~tens; `net_flow_usd` ~1e7
+
+**Must ship:**
+1. Price series owns the main scale. Volume uses a Lightweight Charts histogram on its **own pane/scale**. Never put `volume`, `oi_usd`, `volume_quote`, or ETF dollars on the price scale. Autoscale price to OHLC + MAs + Ichimoku only.
+2. Overlays:
+   - Volume — separate pane (default ON)
+   - ETF net flow — `etf_btc_daily_net_flows.csv` / `etf_eth_daily_net_flows.csv`, field `net_flow_usd_millions`; gaps stay gaps (no zeros for blanks)
+   - Open Interest — `okx_btc_usdt_swap_oi_1d.csv` (and 1h OI when interval is 1h). Prefer `oi` (contracts) or `oi_ccy` on its own pane, not `oi_usd` on price. UI label is **Open Interest**. Short interest is not in the Flow pack (do not invent).
+3. Day tap / crosshair: tooltip and a detail strip show price, every selected MA/Ichimoku, volume, ETF net flow that day, OI that day. Missing fields say **missing**, not 0.
+
+**Verification:**
+- BTC 1d with Volume ON: price visible ~70–80k range, volume in lower pane, y-axis NOT trillions
+- Toggle ETF flow / OI: separate panes, price scale unchanged
+- Hover Aug 28-ish: tooltip has price + MAs + volume + flow/OI when selected
+- `npm test && npm start`
+
+**Verified (localhost):** BTC 1d Volume ON — price Y-axis ~58k–80k (not trillions), candles fill the pane, volume histogram on a lower pane with its own billions scale. ETF net flow pane uses millions; OI uses contracts. Aug 28 tooltip: Price $77822, MA20 $70899, Volume 4.63B, ETF 18.4M USD, OI 2.15M contracts. Missing fields say missing.
+
+**Shipped:** overlay panes PR against main
+
+---
+
 ## Chart Features
 
 ### Kevin's chart: viewport, zoom, 1h, gaps, overlays, drawing

@@ -220,8 +220,26 @@ button:hover {
 }
 
 .chart-tooltip.hidden,
-.chart-empty.hidden {
+.chart-empty.hidden,
+.chart-day-strip.hidden {
   display: none;
+}
+
+.chart-day-strip {
+  margin-top: 10px;
+  padding: 12px 14px;
+  background: #f8f9fa;
+  border: 1px solid #e0e0e0;
+  border-radius: 6px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: #333;
+}
+
+.chart-day-strip .day-strip-title {
+  font-weight: 700;
+  color: #667eea;
+  margin-bottom: 6px;
 }
 
 .chart-empty {

@@ -179,9 +179,23 @@ Calculated in `src/model/indicators.js` or loaded from `indicators_daily.csv`.
 Loaded from `indicators_daily.csv` columns: `tenkan, kijun, senkou_a, senkou_b, chikou`.
 
 ### Volume Histogram
-- Blue bars (rgba 102, 126, 234, 0.3) at bottom
-- Scaled to max volume
+- Own Lightweight Charts pane (not the price scale)
+- Histogram colored by candle direction
 - Toggleable, default ON
+- Pack `volume` / `volume_base` (never `volume_quote` / `volCcy` on the price axis)
+- After Load Data / Fit all / Last few days, BTC price must fill the chart (~tens of thousands)
+
+### ETF net flow
+- Own pane (histogram) when toggled
+- BTC: `etf_btc_daily_net_flows.csv`; ETH: `etf_eth_daily_net_flows.csv`
+- Field: `net_flow_usd_millions` only. Blank days stay gaps (not 0)
+- Not applied to alts (no pack file)
+
+### Open Interest
+- Own pane (line) when toggled; BTC only
+- Files: `okx_btc_usdt_swap_oi_1d.csv` (daily) and `okx_btc_usdt_swap_oi_1h.csv` (1h). Joined OI CSVs are fallback if the swap OI file is missing
+- Plot `oi` (contracts) or `oi_ccy`, **never** `oi_usd` on the price scale
+- **Short interest is not in the Flow pack.** The UI label is Open Interest. Do not invent a short-interest series.
 
 ### Predicted vs Actual vs Naive
 - **Predicted** (dashed purple #9333ea) - Trend model forecasts
@@ -197,8 +211,9 @@ Loaded from `indicators_daily.csv` columns: `tenkan, kijun, senkou_a, senkou_b, 
 - **Fit all** is a control, not the default
 
 ### Interactivity
-- **Crosshair + tooltip** - Price and every selected overlay (MA20/50/100/200, Ichimoku, volume) at that timestamp
-- **Toggles** - Checkboxes add/remove Lightweight Charts series
+- **Crosshair + tooltip** - Price and every selected overlay (MA20/50/100/200, Ichimoku, volume, ETF net flow, Open Interest) at that timestamp. Missing fields say `missing`, not `0`.
+- **Day tap strip** - Clicking a bar fills `#chart-day-strip` with the same fields for that timestamp
+- **Toggles** - Checkboxes add/remove Lightweight Charts series. Volume / ETF / OI each get a new pane under price
 - **Drawings** - Horizontal line and trend line once a series is on screen
 
 ### Gaps
@@ -335,9 +350,13 @@ All endpoints support symbol parameter for multi-asset queries. Returns JSON by 
 - **Impact:** `cg_top100_universe.json` may have limited data
 
 ### No Aggregated OI
-- **Current:** Only BTC OI from OKX
+- **Current:** Only BTC OI from OKX (`okx_btc_usdt_swap_oi_1d.csv` / `_1h.csv`)
 - **Missing:** Aggregated OI across exchanges
-- **Workaround:** Use BTC-specific OI files for OI analysis
+- **Short interest:** not in the Flow pack. Chart overlay is Open Interest (contracts / `oi_ccy`), not short interest, and never `oi_usd` on the price scale.
+
+### Overlay panes vs price scale
+- **Issue (Kevin screenshot):** Volume on the default right scale sent the Y-axis to trillions (`volume_quote` ~1e9, `oi_usd` ~2e9) and crushed BTC (~78k) to a flat line.
+- **Required:** Price pane autoscales OHLC + MAs + Ichimoku only. Volume, ETF millions, and OI contracts each use a separate pane (`priceScaleId` `volume` / `etf` / `oi`, never `right`).
 
 ### Hourly Data Limited (verified hypothesis)
 - **1h data that exists:** BTC only, from `okx_btc_usdt_swap_candles_1h.csv` (~1700 bars, columns `ts_ms`, `datetime_utc`, ohlcv) plus optional joined OI.
@@ -450,6 +469,11 @@ After updates, users may need to clear browser cache to see changes. Hard refres
 
 ## Troubleshooting
 
+### Price is a flat line / Y-axis in trillions
+- **Symptom:** BTC tooltip ~77822 but axis goes to billions/trillions; volume checkbox ON
+- **Cause:** Volume histogram (or `oi_usd` / `volume_quote` / ETF dollars) shared the candle price scale
+- **Fix:** Volume / ETF / OI are separate Lightweight Charts panes. Price autoscale uses OHLC + MAs + Ichimoku only
+
 ### ETH Shows BTC Data
 - **Symptom:** ETH Y-axis shows 57k-82k (BTC range)
 - **Cause:** Missing `indicators_daily.csv` or wrong symbol filtering
@@ -506,6 +530,13 @@ After updates, users may need to clear browser cache to see changes. Hard refres
 - Gaps stay gaps; last price marker + line
 - Overlay tooltip; horizontal + trend drawings
 - Status: **done** — verified on localhost (BTC 1h last few days, ETH 1d, ETH 1h missing)
+
+### Overlay panes (y-axis bug)
+- Volume histogram on its own pane/scale (never `right` with candles)
+- ETF net flow (`net_flow_usd_millions`) and Open Interest (`oi` / `oi_ccy`) optional panes
+- Tooltip + day-tap strip: missing fields say missing, not 0
+- Short interest is not in the pack
+- Status: **done** — BTC 1d Volume ON: price ~58k–80k (not a flat line), volume/ETF/OI on separate panes
 
 ### Latest (PR #1, grok-4.6)
 - ✅ Fixed ETH loading (filter `indicators_daily.csv` by `symbol`; no BTC fallback)

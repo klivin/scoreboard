@@ -5,6 +5,8 @@ export const TOGGLE_OPTION_MAP = {
   'toggle-ma200': 'showMA200',
   'toggle-ichimoku': 'showIchimoku',
   'toggle-volume': 'showVolume',
+  'toggle-etf': 'showEtf',
+  'toggle-oi': 'showOi',
   'toggle-predicted': 'showPredicted',
   'toggle-actual': 'showActual',
   'toggle-naive': 'showNaive'

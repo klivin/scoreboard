@@ -1,6 +1,12 @@
 import { loadAllData } from './ingest.js';
 import { addIndicators } from './indicators.js';
 import { firstRowTimestamp } from './dates.js';
+import {
+  attachFlowOverlays,
+  pickEtfMillions,
+  pickOiContracts,
+  pickVolume
+} from './overlays.js';
 
 function isBtcSymbol(symbol) {
   const upper = String(symbol || '').toUpperCase();
@@ -43,7 +49,7 @@ export function mapIndicatorRow(row) {
     high: numeric(row.high, row.h),
     low: numeric(row.low, row.l),
     close: numeric(row.close, row.c),
-    volume: numeric(row.volume, row.vol),
+    volume: pickVolume(row),
     ma20: numeric(row.ma20),
     ma50: numeric(row.ma50),
     ma100: numeric(row.ma100),
@@ -64,8 +70,8 @@ export function normalizeCandleRow(row) {
     high: numeric(row.high, row.h, row.High),
     low: numeric(row.low, row.l, row.Low),
     close: numeric(row.close, row.c, row.Close),
-    volume: numeric(row.volume, row.vol, row.volCcy, row.Volume),
-    oi: numeric(row.oi, row.open_interest, row.openInterest)
+    volume: pickVolume(row),
+    oi: pickOiContracts(row)
   };
 }
 
@@ -162,7 +168,13 @@ export class SeriesModel {
       throw new Error(missingSeriesMessage(symbol, intervalNorm));
     }
 
-    return applyRangeAndFields(series, from, to, fields);
+    const ranged = applyRangeAndFields(series, from, to, null);
+    const withOverlays = attachFlowOverlays(ranged, {
+      etfRows: this.getEtfRows(symbol),
+      oiRows: isBtcSymbol(symbol) ? this.getOiRows(intervalNorm) : [],
+      interval: intervalNorm
+    });
+    return applyRangeAndFields(withOverlays, null, null, fields);
   }
 
   getIndicators(symbol, interval = '1d') {
@@ -197,30 +209,53 @@ export class SeriesModel {
     return [...symbols].sort();
   }
 
+  getEtfRows(symbol) {
+    this.ensureLoaded();
+    const upper = String(symbol || '').toUpperCase();
+    const key = upper === 'ETH' ? 'etf_eth' : (isBtcSymbol(upper) ? 'etf_btc' : null);
+    if (!key) return [];
+    const pack = this.data[key];
+    return pack && pack.data && pack.data.length ? pack.data : [];
+  }
+
+  getOiRows(interval = '1d') {
+    this.ensureLoaded();
+    const swapKey = interval === '1h' ? 'oi_swap_1h' : 'oi_swap_1d';
+    const joinedKey = interval === '1h' ? 'oi_1h' : 'oi_1d';
+    const primary = this.data[swapKey];
+    if (primary && primary.data && primary.data.length) return primary.data;
+    const fallback = this.data[joinedKey];
+    if (fallback && fallback.data && fallback.data.length) return fallback.data;
+    return [];
+  }
+
   getSignals(symbol) {
     this.ensureLoaded();
 
     const signals = {};
     const symbolUpper = String(symbol || 'BTC').toUpperCase();
 
-    const etfKey = symbolUpper === 'ETH' ? 'etf_eth' : 'etf_btc';
-    if (this.data[etfKey] && this.data[etfKey].data && this.data[etfKey].data.length > 0) {
-      const recent = this.data[etfKey].data.slice(-7);
-      const totalFlow = recent.reduce((sum, row) => sum + (numeric(row.net_flow, row.netFlow, row.flow) || 0), 0);
+    const etfRows = this.getEtfRows(symbolUpper);
+    if (etfRows.length > 0) {
+      const recent = etfRows.slice(-7);
+      const millions = recent.map(pickEtfMillions).filter((value) => Number.isFinite(value));
       signals.etf = {
-        net_flow: totalFlow,
-        days: recent.length
+        net_flow_usd_millions: millions.length ? millions.reduce((sum, value) => sum + value, 0) : null,
+        days: millions.length
       };
     }
 
-    if (this.data.oi_1d && this.data.oi_1d.data && this.data.oi_1d.data.length > 0) {
-      const latest = this.data.oi_1d.data[this.data.oi_1d.data.length - 1];
-      const weekAgo = this.data.oi_1d.data[Math.max(0, this.data.oi_1d.data.length - 8)];
-      const latestOi = numeric(latest.oi, latest.open_interest, latest.openInterest) || 0;
-      const weekOi = weekAgo ? (numeric(weekAgo.oi, weekAgo.open_interest, weekAgo.openInterest) || 0) : 0;
+    const oiRows = isBtcSymbol(symbolUpper) ? this.getOiRows('1d') : [];
+    if (oiRows.length > 0) {
+      const latest = oiRows[oiRows.length - 1];
+      const weekAgo = oiRows[Math.max(0, oiRows.length - 8)];
+      const latestOi = pickOiContracts(latest);
+      const weekOi = pickOiContracts(weekAgo);
       signals.oi = {
-        current: latestOi,
-        change: weekOi ? ((latestOi - weekOi) / weekOi * 100) : 0
+        current: Number.isFinite(latestOi) ? latestOi : null,
+        change: Number.isFinite(latestOi) && Number.isFinite(weekOi) && weekOi !== 0
+          ? ((latestOi - weekOi) / weekOi * 100)
+          : null
       };
     }
 

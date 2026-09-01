@@ -44,3 +44,8 @@ JSON files should be valid JSON with appropriate schema for their content type.
 If a named file is missing, ingest marks it missing and does not invent OI, ETF, price, indicator, or universe series. The UI shows an on-page error when the selected symbol+interval has no pack rows. CoinGecko 429 left most categories blank — those stay blank.
 
 `indicators_daily.csv` is the multi-symbol daily file. Columns: `date_utc,asset_id,symbol,open,high,low,close,volume,ma20,ma50,ma100,ma200,tenkan,kijun,senkou_a,senkou_b,chikou`. Pack symbols: AVAX BNB BTC DOGE ETH LINK PEPE SHIB SOL SUI TRUMP XRP. 1h OKX files are BTC-only.
+
+Chart overlays (real pack columns only; gaps stay gaps):
+- Volume: `volume` / `volume_base` on a **separate pane**. Never put `volume_quote` / `volCcy` on the price scale.
+- ETF: `etf_btc_daily_net_flows.csv` / `etf_eth_daily_net_flows.csv` field `net_flow_usd_millions`.
+- Open Interest: `okx_btc_usdt_swap_oi_1d.csv` / `okx_btc_usdt_swap_oi_1h.csv` field `oi` or `oi_ccy` (not `oi_usd` on price). Short interest is not in the pack.

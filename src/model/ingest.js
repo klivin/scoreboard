@@ -170,6 +170,8 @@ export function loadAllData() {
     oi_1d: loadCSV('okx_btc_oi_candles_1d_joined.csv'),
     candles_1h: loadCSV('okx_btc_usdt_swap_candles_1h.csv'),
     candles_1d: loadCSV('okx_btc_usdt_swap_candles_1d.csv'),
+    oi_swap_1h: loadCSV('okx_btc_usdt_swap_oi_1h.csv'),
+    oi_swap_1d: loadCSV('okx_btc_usdt_swap_oi_1d.csv'),
     etf_btc: loadCSV('etf_btc_daily_net_flows.csv'),
     etf_eth: loadCSV('etf_eth_daily_net_flows.csv'),
     indicators: loadCSV('indicators_daily.csv'),

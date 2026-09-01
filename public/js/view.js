@@ -63,18 +63,20 @@ export class SignalsView {
     const cards = [];
 
     if (signals.etf) {
+      const millions = signals.etf.net_flow_usd_millions;
       cards.push({
         label: 'ETF Net Flow',
-        value: signals.etf.net_flow ? `$${(signals.etf.net_flow / 1e6).toFixed(1)}M` : 'N/A',
-        note: signals.etf.days ? `${signals.etf.days}d avg` : ''
+        value: Number.isFinite(millions) ? `$${millions.toFixed(1)}M` : 'missing',
+        note: signals.etf.days ? `${signals.etf.days}d sum` : ''
       });
     }
 
     if (signals.oi) {
+      const current = signals.oi.current;
       cards.push({
         label: 'Open Interest',
-        value: signals.oi.current ? `${(signals.oi.current / 1e6).toFixed(1)}M` : 'N/A',
-        note: signals.oi.change ? `${signals.oi.change > 0 ? '+' : ''}${signals.oi.change.toFixed(1)}%` : ''
+        value: Number.isFinite(current) ? `${(current / 1e6).toFixed(1)}M contracts` : 'missing',
+        note: Number.isFinite(signals.oi.change) ? `${signals.oi.change > 0 ? '+' : ''}${signals.oi.change.toFixed(1)}%` : ''
       });
     }
 

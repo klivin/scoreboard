@@ -60,6 +60,8 @@
           <label><input type="checkbox" id="toggle-ma200"> MA200 (SMA)</label>
           <label><input type="checkbox" id="toggle-ichimoku"> Ichimoku Cloud</label>
           <label><input type="checkbox" id="toggle-volume" checked> Volume</label>
+          <label><input type="checkbox" id="toggle-etf"> ETF net flow</label>
+          <label title="OKX open interest (contracts). Short interest is not in the Flow pack."><input type="checkbox" id="toggle-oi"> Open Interest</label>
           <label><input type="checkbox" id="toggle-predicted"> Predicted</label>
           <label><input type="checkbox" id="toggle-actual"> Actual</label>
           <label><input type="checkbox" id="toggle-naive" checked> Naive Baseline</label>
@@ -77,6 +79,7 @@
           <div id="chart-tooltip" class="chart-tooltip hidden"></div>
           <div id="chart-empty" class="chart-empty hidden"></div>
         </div>
+        <div id="chart-day-strip" class="chart-day-strip hidden"></div>
       </div>
 
       <div id="signals-container">

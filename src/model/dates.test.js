@@ -38,6 +38,10 @@ test('parseUtcTimestamp reads OKX 1h ts_ms and datetime_utc', () => {
   assert.strictEqual(fromText, Date.parse('2024-08-01T00:00:00Z'));
 });
 
+test('parseUtcTimestamp reads Farside-style 28 Aug 2026', () => {
+  assert.strictEqual(parseUtcTimestamp('28 Aug 2026'), Date.parse('2026-08-28T00:00:00Z'));
+});
+
 test('formatPriceLabel keeps ETH-scale thousands and SHIB-scale fractions', () => {
   assert.strictEqual(formatPriceLabel(3220.4), '3220');
   assert.strictEqual(formatPriceLabel(64800.2), '64800');
