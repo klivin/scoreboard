@@ -1,10 +1,8 @@
 import { lastKnownRow, toCandleData, toLineData, toHistogramData, timeKey, predictedToLine } from './chart-data.js';
 import { IchimokuCloudPrimitive } from './ichimoku-cloud.js';
 import {
-  OVERLAY_PANE_SCALES,
   PRICE_PANE_INDEX,
   chartWrapHeight,
-  overlaySeriesDefaults,
   paneStretchFactor
 } from './chart-panes.js';
 import { buildTooltipLines, formatPrice as formatPriceLabel } from './chart-tooltip.js';
@@ -236,14 +234,33 @@ export class ChartView {
     });
   }
 
-  addOverlayHistogram(id, field, scaleId, paneIndex, colorForRow, priceFormat) {
+  ensureOverlayPane(paneIndex) {
+    if (!this.chart || typeof this.chart.addPane !== 'function') return paneIndex;
+    while (this.chart.panes().length <= paneIndex) {
+      this.chart.addPane();
+    }
+    return paneIndex;
+  }
+
+  addSeriesToPane(definition, options, paneIndex) {
+    this.ensureOverlayPane(paneIndex);
+    const panes = this.chart.panes && this.chart.panes();
+    const pane = panes && panes[paneIndex];
+    if (pane && typeof pane.addSeries === 'function') {
+      return pane.addSeries(definition, options);
+    }
+    return this.chart.addSeries(definition, options, paneIndex);
+  }
+
+  addOverlayHistogram(id, field, paneIndex, colorForRow, priceFormat) {
     const L = this.lwc();
     const data = toHistogramData(this.data, field, colorForRow);
     if (!data.length) return null;
-    const series = this.chart.addSeries(L.HistogramSeries, {
-      ...overlaySeriesDefaults(scaleId),
+    const series = this.addSeriesToPane(L.HistogramSeries, {
       color: 'rgba(102, 126, 234, 0.45)',
-      priceFormat
+      priceFormat,
+      lastValueVisible: true,
+      priceLineVisible: false
     }, paneIndex);
     series.setData(data);
     this.overlaySeries[id] = series;
@@ -321,7 +338,6 @@ export class ChartView {
         this.volumeSeries = this.addOverlayHistogram(
           'volume',
           'volume',
-          OVERLAY_PANE_SCALES.volume,
           paneIndex,
           (row) => (
             Number.isFinite(row.close) && Number.isFinite(row.open) && row.close >= row.open
@@ -341,7 +357,6 @@ export class ChartView {
         this.etfSeries = this.addOverlayHistogram(
           'etf',
           'etf_net_flow_usd_millions',
-          OVERLAY_PANE_SCALES.etf,
           paneIndex,
           (_row, value) => (
             value >= 0 ? 'rgba(16, 185, 129, 0.55)' : 'rgba(239, 68, 68, 0.55)'
@@ -362,10 +377,11 @@ export class ChartView {
       const oiData = toLineData(this.data, 'oi');
       if (oiData.length) {
         try {
-          this.oiSeries = this.chart.addSeries(L.LineSeries, {
-            ...overlaySeriesDefaults(OVERLAY_PANE_SCALES.oi),
+          this.oiSeries = this.addSeriesToPane(L.LineSeries, {
             color: '#0ea5e9',
             lineWidth: 2,
+            lastValueVisible: true,
+            priceLineVisible: false,
             priceFormat: { type: 'volume' }
           }, paneIndex);
           this.oiSeries.setData(oiData);

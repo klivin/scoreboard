@@ -2,18 +2,15 @@ import { test } from 'node:test';
 import assert from 'node:assert';
 import {
   PRICE_PANE_INDEX,
-  PRICE_SCALE_ID,
-  OVERLAY_PANE_SCALES,
+  FIRST_OVERLAY_PANE_INDEX,
   overlayPaneCount,
   paneStretchFactor
 } from './chart-panes.js';
 
-test('volume / ETF / OI use overlay scales, never the price right scale', () => {
+test('volume / ETF / OI are never the price pane', () => {
   assert.strictEqual(PRICE_PANE_INDEX, 0);
-  assert.strictEqual(PRICE_SCALE_ID, 'right');
-  assert.notStrictEqual(OVERLAY_PANE_SCALES.volume, PRICE_SCALE_ID);
-  assert.notStrictEqual(OVERLAY_PANE_SCALES.etf, PRICE_SCALE_ID);
-  assert.notStrictEqual(OVERLAY_PANE_SCALES.oi, PRICE_SCALE_ID);
+  assert.strictEqual(FIRST_OVERLAY_PANE_INDEX, 1);
+  assert.ok(FIRST_OVERLAY_PANE_INDEX > PRICE_PANE_INDEX);
 });
 
 test('each enabled overlay adds its own pane under the price pane', () => {
