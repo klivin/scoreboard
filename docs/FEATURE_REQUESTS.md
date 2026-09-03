@@ -94,6 +94,24 @@ Status key: **open** (not started) | **doing** (in progress) | **done** (shipped
 
 ---
 
+### Overlay toggles must preserve zoom/pan (not refit to last few days)
+**Status:** done  
+**Request:** Toggling MA20/50/100/200, Ichimoku, Volume, Predicted/Actual/Naive, ETF flow, or OI must not reset the visible time range. Only **Fit all**, **Last few days**, **Symbol**, **Interval**, and initial **Load Data** may change viewport.
+
+**Root cause:** Checkbox handlers called `render()`, which destroyed the chart and re-applied `applyDefaultViewport()` (~5-day window).
+
+**Fix:** `ChartView.refreshOverlays()` captures `timeScale().getVisibleLogicalRange()` (falls back to `getVisibleRange()`), removes/re-adds overlay series without destroying candles, then restores the range on the next animation frame. Toggle handlers call `refreshOverlays()` instead of full `render()`. Price + overlay panes share one Lightweight Charts time scale — that shared scale is what we capture/restore.
+
+**Verification:**
+- Zoom BTC 1d into ~1 day mid-history; toggle MA200, Ichimoku, Volume, ETF, OI one at a time — window unchanged
+- **Fit all** resets range; interval change to 1h resets to that interval's default
+- `npm test` — `public/js/chart-view.test.js` overlay toggle range preservation
+- Headless Chrome against localhost: logical range `{from:40.25,to:43.75}` unchanged after MA200 / Ichimoku / Volume / ETF / OI toggles; Fit all → `{from:0,to:93}`; interval 1h rebuilt the chart and left the zoomed window
+
+**Shipped:** overlay zoom-preserve PR against main
+
+---
+
 ## Chart Features
 
 ### Kevin's chart: viewport, zoom, 1h, gaps, overlays, drawing

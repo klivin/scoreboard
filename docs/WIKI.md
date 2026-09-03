@@ -273,12 +273,13 @@ Loaded from `indicators_daily.csv` columns: `tenkan, kijun, senkou_a, senkou_b, 
 - **Default viewport:** last few days (`src/model/viewport.js`), not `fitContent()` on the full dump
 - **Pan:** drag / horizontal scroll
 - **Zoom:** mouse wheel and pinch on the time axis
-- **Fit all** is a control, not the default
+- **Fit all** and **Last few days** are explicit controls, not the default
+- **Overlay toggles preserve zoom/pan:** MA/Ichimoku/volume/ETF/OI/predicted toggles call `ChartView.refreshOverlays()`, which captures the visible logical range, updates series, then restores the range. Symbol, interval, Load Data, Fit all, and Last few days still reset viewport.
 
 ### Interactivity
 - **Crosshair + tooltip** - Price and every selected overlay (MA20/50/100/200, Ichimoku, volume, ETF net flow, Open Interest) at that timestamp. Missing fields say `missing`, not `0`.
 - **Day tap strip** - Clicking a bar fills `#chart-day-strip` with the same fields for that timestamp
-- **Toggles** - Checkboxes add/remove Lightweight Charts series. Volume / ETF / OI each get a new pane under price
+- **Toggles** - Checkboxes add/remove Lightweight Charts series via `refreshOverlays()` (preserves zoom/pan). Volume / ETF / OI each get a new pane under price
 - **Drawings** - Horizontal line and trend line once a series is on screen
 
 ### Gaps
@@ -677,6 +678,11 @@ After updates, users may need to clear browser cache to see changes. Hard refres
 - **Cause:** Event listener not wired, or refresh hung
 - **Fix:** Load Data calls `POST /api/refresh` then `GET /api/indicators`. Check `#refresh-status` for per-source last-success age. Verify controller `setupEventListeners()` calls `reloadSelected()`.
 
+### Overlay toggles preserve zoom/pan
+- **Symptom:** Toggling MA200 / Ichimoku / Volume snaps chart back to ~1-week default
+- **Cause:** Toggle called full `render()` → `destroyChart()` → `applyDefaultViewport()`
+- **Fix:** `refreshOverlays()` + `captureVisibleRange()` / `restoreVisibleRange()` in `public/js/chart-view.js`
+
 ### Overlays Don't Toggle
 - **Symptom:** Checking boxes doesn't change chart
 - **Cause:** `toggle-ma20` was mapped to `showma20`, not `showMA20`. The canvas never saw the option change.
@@ -733,6 +739,12 @@ After updates, users may need to clear browser cache to see changes. Hard refres
 - Short interest is not in the pack
 - Status: **done** — BTC 1d Volume ON: price ~58k–80k (not a flat line), volume/ETF/OI on separate panes
 
+### Overlay toggles preserve zoom/pan
+- Toggle handlers call `refreshOverlays()` instead of full `render()`
+- Captured logical range restored after series add/remove (double `requestAnimationFrame`)
+- Fit all / Last few days / symbol / interval / Load Data still reset viewport
+- Status: **done** — verified on localhost (BTC 1d zoomed window survived MA200 / Ichimoku / Volume / ETF / OI; Fit all and 1h interval reset)
+
 ### Latest (PR #1, grok-4.6)
 - ✅ Fixed ETH loading (filter `indicators_daily.csv` by `symbol`; no BTC fallback)
 - ✅ ETH 1h errors on-page instead of drawing daily ETH or BTC
@@ -764,5 +776,5 @@ After updates, users may need to clear browser cache to see changes. Hard refres
 ---
 
 **Last Updated:** 2026-09-03  
-**Version:** v1.3 (incremental OKX refresh)  
+**Version:** v1.4 (overlay toggles preserve zoom)  
 **Status:** Not Pooli. No keys client-side. No trades.

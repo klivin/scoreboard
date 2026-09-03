@@ -356,7 +356,11 @@ export class AppController {
         const option = optionKeyFromToggleId(id);
         if (!option) return;
         this.views.chart.setOption(option, checkbox.checked);
-        this.views.chart.render();
+        if (typeof this.views.chart.refreshOverlays === 'function') {
+          this.views.chart.refreshOverlays();
+        } else {
+          this.views.chart.render();
+        }
       });
     });
 
