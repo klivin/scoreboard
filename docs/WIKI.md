@@ -314,6 +314,8 @@ Outputs: `store/backtest_{SYMBOL}_{horizon}.json`, `_trades.csv`, `_report.md`
 
 When Flow pack is not mounted, backtest uses a **deterministic OHLC fixture** (`src/model/fixtures/backtest-pack.js`) — results are reproducible in CI but are **not** live market claims. Mount the pack at `/workspace/scoreboard/` or `./data/` for real fixture history.
 
+**Did anything beat both baselines on this fixture?** No strategy or consensus beat buy-and-hold on total return (see `docs/BACKTEST.md`). Several beat the naive last-price forecaster only because naive stayed flat (0 trades): last close equals the naive prediction, so it never goes long. Do not oversell these results.
+
 ### API
 
 ```
@@ -528,7 +530,8 @@ scoreboard/
 │   └── README.md
 ├── docs/                   # Documentation
 │   ├── WIKI.md            # This file
-│   └── FEATURE_REQUESTS.md
+│   ├── FEATURE_REQUESTS.md
+│   └── BACKTEST.md        # Snapshot of last fixture backtest (honest numbers)
 ├── public/                # Frontend
 │   ├── css/style.css
 │   ├── js/
@@ -541,6 +544,8 @@ scoreboard/
 │   │   └── api.js
 │   ├── model/
 │   │   ├── forecast.js
+│   │   ├── backtest.js
+│   │   ├── signals/
 │   │   ├── indicators.js
 │   │   ├── ingest.js
 │   │   ├── series.js

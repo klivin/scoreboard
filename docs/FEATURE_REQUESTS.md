@@ -508,6 +508,8 @@ npm start
 - Interactive equity-curve backtest visualization tab
 - Full out-of-sample validation on live Flow pack when mounted (CI uses deterministic fixture when pack absent)
 
+**Backtest honesty (2026-09-03, fixture, weekly):** no strategy or consensus beat buy-and-hold on total return (BTC B&H 23.21%, best strategy ichimoku 4.27%; ETH B&H 12.72%, best MACD 1.23%). See `docs/BACKTEST.md`. Status stays **doing**.
+
 **Verification:**
 - `npm test` passes (lookahead, per-strategy synthetic tests, consensus, backtest metrics)
 - `npm run backtest` prints report with actual numbers vs baselines
