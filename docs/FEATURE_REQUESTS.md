@@ -466,6 +466,38 @@ curl -sS 'http://localhost:3000/api/series?symbol=BTC&interval=1h&sinceCursor=ok
 
 ---
 
+## Universe money-scanner
+
+### Universe tab → money-scanner / research board
+**Status:** doing  
+**Request:** Universe tab must become a usable money-scanner / research board, not a dead CoinGecko card list. Table of supported stocks/crypto/assets with current price, liquidity/data freshness, 1d/7d/30d model direction + confidence, bullish/bearish flip timestamp, signal consensus (reuse the signal engine), backtest status, and ETF/OI/correlation context where those series actually exist.
+
+**Honesty (critical):**
+- Research / paper only. Not automatic trade recommendations. Banner must say so.
+- No fabricated ranking or sentiment. No composite “hot list” score.
+- Missing cells say **missing**, never `0`.
+- Stocks are not in the Flow pack — do not invent equity series. Unsupported asset classes stay empty/missing.
+- No keys. No trades. Not Pooli.
+
+**Must ship:**
+1. Sort/filter by: new bullish/bearish flip, confidence, horizon, asset class, REAL holdings, TRACKING
+2. Add to Tracking / Remove Tracking wired to Investments `scoreboard.investments` `collections.tracking` when that store is present; otherwise a schema-versioned local tracking namespace
+3. Selecting a row opens the Overview chart for that asset
+4. Start tracking freezes baseline timestamp + price. Evaluation view compares forecast/actual forward P&amp;L and model vs naive from that baseline. Stop preserves history
+5. Flip history: when consensus/direction flips, record timestamp and prior/new state
+
+**Design:** `docs/WIKI.md` (Universe money-scanner)
+
+**Verification:**
+- `npm test` — row construction (missing stays missing), flip detection + history, start/stop baseline freeze + history, filters/sorts
+- Localhost Universe tab: usable scanner table, research-only banner, honest empty/missing cells
+- REAL / TRACKING badges respected when Investments store has them
+- Row click still loads Overview for that symbol
+
+**Priority:** High
+
+---
+
 ## Future Enhancements
 
 ### Supertrend/ATR regime filter (signal strategy e)

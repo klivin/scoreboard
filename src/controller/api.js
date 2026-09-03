@@ -10,6 +10,9 @@ import {
   HORIZONS
 } from '../model/signals/index.js';
 import { runFullBacktest, loadBacktestSeries, formatBacktestReport } from '../model/backtest.js';
+import { loadScannerPayload } from '../model/scanner-build.js';
+import { evaluateTrackingFromBaseline, finiteOrNull } from '../model/scanner.js';
+import { scannerFlipsStore } from '../model/store-adapter.js';
 
 export function handleGetSeries(req, res) {
   const { symbol = 'BTC', interval = '1d', from, to, fields, since, sinceCursor } = req.query;
@@ -144,6 +147,92 @@ export function handleGetUniverse(req, res) {
   try {
     const universe = seriesModel.getUniverse();
     res.json(universe);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+}
+
+function priorFlipsFromStore() {
+  const prior = {};
+  for (const item of scannerFlipsStore.getAll() || []) {
+    if (!item || !item.symbol) continue;
+    const symbol = String(item.symbol).toUpperCase();
+    prior[symbol] = item.history || [];
+  }
+  return prior;
+}
+
+function persistScannerFlips(rows) {
+  for (const row of rows || []) {
+    if (!row || !row.symbol) continue;
+    const id = `flip_${row.symbol}`;
+    const payload = {
+      symbol: row.symbol,
+      history: row.flipHistory || [],
+      lastFlipAt: row.flip ? row.flip.lastFlipAt : null,
+      updatedAt: Date.now()
+    };
+    const existing = typeof scannerFlipsStore.getById === 'function'
+      ? scannerFlipsStore.getById(id)
+      : (scannerFlipsStore.getAll() || []).find((item) => item.id === id);
+    if (existing && typeof scannerFlipsStore.update === 'function') {
+      scannerFlipsStore.update(id, payload);
+    } else if (typeof scannerFlipsStore.add === 'function') {
+      scannerFlipsStore.add({ id, ...payload });
+    }
+  }
+}
+
+export function handleGetScanner(req, res) {
+  try {
+    seriesModel.load();
+    const extraSymbols = req.query.extra
+      ? String(req.query.extra).split(',').map((s) => s.trim()).filter(Boolean)
+      : [];
+    const payload = loadScannerPayload({
+      model: seriesModel,
+      priorFlips: priorFlipsFromStore(),
+      extraSymbols
+    });
+    persistScannerFlips(payload.rows);
+    res.json(payload);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+}
+
+export function handleGetScannerEvaluate(req, res) {
+  const {
+    symbol = '',
+    startedAt,
+    startDate,
+    baselinePrice,
+    status = 'active',
+    stopPrice
+  } = req.query;
+
+  try {
+    seriesModel.load();
+    let series = [];
+    try {
+      series = seriesModel.getIndicators(symbol, '1d');
+    } catch {
+      series = [];
+    }
+    const record = {
+      symbol: String(symbol).toUpperCase(),
+      startedAt: finiteOrNull(startedAt),
+      startDate: startDate || null,
+      baselinePrice: finiteOrNull(baselinePrice),
+      status,
+      stopPrice: finiteOrNull(stopPrice),
+      history: []
+    };
+    const evaluation = evaluateTrackingFromBaseline(record, series);
+    res.json({
+      disclaimer: 'Research / paper only. Evaluation from frozen baseline. Not a trade recommendation.',
+      evaluation
+    });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
