@@ -548,7 +548,7 @@ After updates, users may need to clear browser cache to see changes. Hard refres
 - Toggle handlers call `refreshOverlays()` instead of full `render()`
 - Captured logical range restored after series add/remove (double `requestAnimationFrame`)
 - Fit all / Last few days / symbol / interval / Load Data still reset viewport
-- Status: **doing** — verify on localhost after merge
+- Status: **done** — verified on localhost (BTC 1d zoomed window survived MA200 / Ichimoku / Volume / ETF / OI; Fit all and 1h interval reset)
 
 ### Latest (PR #1, grok-4.6)
 - ✅ Fixed ETH loading (filter `indicators_daily.csv` by `symbol`; no BTC fallback)
