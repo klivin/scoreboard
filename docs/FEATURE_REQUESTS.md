@@ -414,6 +414,56 @@ curl -sS -X POST 'http://localhost:3000/api/refresh?source=okx-candles&symbol=BT
 curl -sS 'http://localhost:3000/api/series?symbol=BTC&interval=1h&sinceCursor=okx-candles:BTC:1h&format=json'
 ```
 
+## Investments
+
+### Investments tab + local brokerage import (first slice)
+**Status:** doing  
+**Request:** Separate Investments scope from chart/universe. Browser-only Activity CSV import (`<input type=file>` + FileReader). Validate + preview before commit. Preserve raw rows plus normalized events. REAL vs TRACKING badges never mix P&L. FIFO lots (average-cost selectable). Paper BUY/SELL and start/stop tracking are always TRACKING. Transaction markers on asset charts. Local CSV/JSON export. Schema-versioned local store with its own collection namespaces.
+
+**Privacy (critical):**
+- Kevin's attached E*TRADE Activity CSV is private. Do **not** read, hardcode, commit, upload, or embed it.
+- File stays in this browser / local store and is **not transmitted**. Server must not receive the raw CSV.
+- Tests use **synthetic** rows with the same columns only. No real brokerage fixtures.
+
+**Columns (canonical + aliases):** Activity/Trade Date, Transaction Date, Settlement Date, Activity Type, Description, Symbol, Cusip, Quantity, Price, Amount, Commission, Category, Note.
+
+**Supported activity types:** buys, sells, dividends, exchanges, options/expired, fees. Never infer a fill when quantity/price is missing. Missing fields stay missing (not 0). Unsupported and missing-price events are marked clearly. Symbol changes / ETFs / options require **explicit** mapping — no automatic symbol inference. Never overwrite REAL positions from a screenshot; import history first.
+
+**Shipped in this slice:**
+- Investments tab (empty state + prominent privacy warning + local file picker)
+- Parse → validate → preview → explicit Commit
+- `scoreboard.investments` local store (schemaVersion, collections: `rawTransactions`, `events`, `paperTrades`, `tracking`, `symbolMaps`, `settings`) — not mixed with chart/server `store/`
+- REAL vs TRACKING sections, badges, and separate P&L
+- FIFO lot matching + realized/unrealized P&L, cost basis, return, dividends, drawdown
+- Average-cost method selectable (implemented)
+- Paper BUY/SELL at a point-in-time (always TRACKING) + forward performance
+- Start/stop tracking (stop preserves history)
+- Transaction markers on Overview charts with click/tap detail
+- Local CSV/JSON export (download Blob; no upload)
+
+**Not shipped / open:**
+- Screenshot / OCR position import (intentionally absent — would overwrite REAL)
+- Broker sync, keys, or any server-side CSV ingest
+- Automatic symbol inference (will stay forbidden)
+
+**Verification:**
+- `npm test` passes (synthetic CSV only: parse/validate, missing qty/price, REAL vs TRACKING, FIFO, markers, start/stop history, schema migration)
+- Fresh localhost: Investments tab visible; click shows empty state + privacy warning + import button
+- After selecting a **synthetic** file: preview with errors/warnings + Commit; nothing leaves the browser
+- REAL and TRACKING sections render separately
+- Existing chart/universe features stay intact
+
+**Localhost UI (2026-09-03, synthetic CSV only — not Kevin's E*TRADE file):**
+- Investments tab: privacy warning + empty state + file input
+- Preview listed missing-price / missing-qty / needs-mapping; Commit required
+- After commit: REAL P&L (realized $559, unrealized **missing**, basis $360, dividends $25); flagged rows marked no-fill
+- Paper BUY BTC 2024-07-01 qty 2 @ 140 stayed TRACKING; not mixed into REAL
+- Start ETH 2024-01-01 @ 2000 then Stop: row remains, status stopped, history kept, still TRACKING
+- Overview tab controls still render (this host had no Flow pack, so BTC 1d chart was empty — not an Investments regression)
+- Chart transaction markers: unit-tested; not visually confirmed on live candles (no pack)
+
+**Priority:** High
+
 ---
 
 ## Future Enhancements

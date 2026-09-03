@@ -30,6 +30,15 @@ Scoreboard is a crypto market analysis and forecasting dashboard built with vani
 - `store.js` - Local JSON storage (forecasts, errors, universe, ingest_watermarks, ingest_series)
 - `store-adapter.js` - Abstraction layer for local/Firestore backends
 
+**Investments (browser-local, not the chart store)** (`public/js/investments/`)
+- `schema.js` - `schemaVersion` + collection namespaces + migrations
+- `store.js` - `localStorage` key `scoreboard.investments` only (never `store/*.json`)
+- `csv.js` / `parse.js` / `validate.js` - Activity CSV parse, normalize, preview
+- `lots.js` - FIFO and average-cost lots, P&L, drawdown (REAL and TRACKING separate)
+- `tracking.js` - paper BUY/SELL + start/stop tracking (always TRACKING)
+- `markers.js` / `export.js` - chart marker payloads + local CSV/JSON export
+- `view.js` / `controller.js` - Investments tab UI (FileReader; no upload)
+
 **View** (`public/js/view.js`, `public/js/chart-view.js`)
 - `ChartView` - Lightweight Charts price chart (pan/zoom, overlays, drawings)
 - `StatsView` - Statistics cards
@@ -438,6 +447,8 @@ generateForecast(data, horizonDays) {
 - `ingest_watermarks.json` - Per-source `{ lastTimestamp, lastSuccessAt, rowCount }`
 - `ingest_series.json` - Upserted adapter rows (natural key `source:symbol:interval:timestamp`)
 
+These server-side files are **not** used for brokerage imports. Investments use a separate browser namespace (`scoreboard.investments`).
+
 **Interface:**
 ```javascript
 getAll() → Array<any>
@@ -714,7 +725,51 @@ After updates, users may need to clear browser cache to see changes. Hard refres
 
 ---
 
+## Investments (local-only)
+
+**Status:** doing (first slice). Separate functional tab from Overview/Forecasts/Universe.
+
+**Privacy:**
+- Import is `<input type="file">` + `FileReader` in the browser. The raw CSV is never POSTed, never written under `store/`, and never sent to Firestore.
+- UI shows a prominent warning: the file stays in this browser / local store and is not transmitted.
+- Do not commit real E*TRADE activity files. Tests use synthetic rows with the same columns.
+- No keys. No trades. Not Pooli.
+
+**Store (schema-versioned):**
+```
+scoreboard.investments
+  schemaVersion: 1
+  collections.rawTransactions   # original parsed rows
+  collections.events            # normalized events (REAL from import)
+  collections.paperTrades       # TRACKING paper BUY/SELL
+  collections.tracking          # start/stop watch records (history preserved)
+  collections.symbolMaps        # explicit symbol/CUSIP remaps only
+  collections.settings          # costMethod fifo | average
+```
+
+**REAL vs TRACKING:** confirmed imported holdings/transactions are REAL. Watchlist, paper marks, and start/stop tracking are TRACKING. Badges appear in the tab, P&L panels, and chart markers. P&L is never mixed across badges.
+
+**Fills:** a buy/sell becomes a lot fill only when **both** quantity and price are present. Missing quantity or price is marked; no fill is inferred. Dividends, fees, exchanges, and options/expired do not invent fills. Exchanges / ticker changes / options require an explicit symbol map.
+
+**P&L:** FIFO (default) or average-cost. Realized, unrealized, cost basis, return, dividends, drawdown. Missing mark prices stay `missing`, not `0`.
+
+**Charts:** transaction markers on the Overview asset chart (exact date, qty, price, fees, source, badge). Click/tap opens a detail strip.
+
+**Export:** client-side JSON/CSV download via Blob. No server round-trip.
+
+---
+
 ## Changelog
+
+### Investments tab (first slice, local-only)
+- Investments tab: empty state, privacy warning, local file import, preview + Commit
+- Schema-versioned `scoreboard.investments` store; REAL vs TRACKING never mix
+- FIFO + average-cost lots; paper BUY/SELL; start/stop tracking preserves history
+- Transaction markers on asset charts; local CSV/JSON export
+- Tests: synthetic CSV only. Real brokerage files are not in-repo and were not imported
+- Localhost UI (synthetic CSV): empty state + privacy warning, preview/Commit, REAL vs TRACKING, paper BUY, start/stop keeps history
+- Chart markers unit-tested; live candle overlay not visually confirmed on this host (no Flow pack)
+- Status: **doing** — first-slice UI/tests passed; screenshot import and broker sync stay open
 
 ### Signal engine + backtest (research, first slice)
 - Extensible strategies: EMA golden/death (true EMA50), MACD from close, RSI recovery, Ichimoku pack fields
@@ -776,5 +831,5 @@ After updates, users may need to clear browser cache to see changes. Hard refres
 ---
 
 **Last Updated:** 2026-09-03  
-**Version:** v1.4 (overlay toggles preserve zoom)  
-**Status:** Not Pooli. No keys client-side. No trades.
+**Version:** v1.5 (Investments tab + local-only import)  
+**Status:** Not Pooli. No keys client-side. No trades. Import stays in-browser.
