@@ -240,6 +240,124 @@ export class ChartView {
     });
   }
 
+  captureVisibleRange() {
+    if (!this.chart) return null;
+    const ts = this.chart.timeScale();
+    try {
+      if (typeof ts.getVisibleLogicalRange === 'function') {
+        const logical = ts.getVisibleLogicalRange();
+        if (logical && Number.isFinite(logical.from) && Number.isFinite(logical.to)) {
+          return { kind: 'logical', range: { from: logical.from, to: logical.to } };
+        }
+      }
+    } catch {
+      /* fall through to time range */
+    }
+    try {
+      if (typeof ts.getVisibleRange === 'function') {
+        const time = ts.getVisibleRange();
+        if (time && time.from != null && time.to != null) {
+          return { kind: 'time', range: { from: time.from, to: time.to } };
+        }
+      }
+    } catch {
+      /* no visible range available */
+    }
+    return null;
+  }
+
+  restoreVisibleRange(captured, { immediate = false } = {}) {
+    if (!this.chart || !captured) return;
+    const apply = () => {
+      const ts = this.chart.timeScale();
+      try {
+        if (captured.kind === 'logical' && typeof ts.setVisibleLogicalRange === 'function') {
+          ts.setVisibleLogicalRange(captured.range);
+          return;
+        }
+        if (captured.kind === 'time' && typeof ts.setVisibleRange === 'function') {
+          ts.setVisibleRange(captured.range);
+        }
+      } catch (error) {
+        console.warn('viewport restore skipped', error);
+      }
+    };
+    if (immediate) {
+      apply();
+      return;
+    }
+    if (typeof requestAnimationFrame === 'function') {
+      requestAnimationFrame(() => requestAnimationFrame(apply));
+      return;
+    }
+    apply();
+  }
+
+  detachIchimokuCloud() {
+    if (this.cloud && this.candleSeries && typeof this.candleSeries.detachPrimitive === 'function') {
+      try {
+        this.candleSeries.detachPrimitive(this.cloud);
+      } catch {
+        /* already detached */
+      }
+    }
+  }
+
+  removeOverlaySeries() {
+    if (!this.chart) return;
+    this.detachIchimokuCloud();
+    const seriesToRemove = new Set([
+      ...Object.values(this.overlaySeries),
+      ...Object.values(this.predictedLines),
+      this.volumeSeries,
+      this.etfSeries,
+      this.oiSeries
+    ].filter(Boolean));
+    for (const series of seriesToRemove) {
+      try {
+        this.chart.removeSeries(series);
+      } catch {
+        /* already removed */
+      }
+    }
+    this.overlaySeries = {};
+    this.predictedLines = {};
+    this.volumeSeries = null;
+    this.etfSeries = null;
+    this.oiSeries = null;
+  }
+
+  trimOverlayPanes() {
+    if (!this.chart || typeof this.chart.panes !== 'function') return;
+    if (typeof this.chart.removePane !== 'function') return;
+    while (this.chart.panes().length > 1) {
+      try {
+        this.chart.removePane(this.chart.panes().length - 1);
+      } catch {
+        break;
+      }
+    }
+  }
+
+  refreshOverlays() {
+    if (!this.chart || !this.data || this.data.length === 0) return;
+
+    const captured = this.captureVisibleRange();
+    this.removeOverlaySeries();
+    this.trimOverlayPanes();
+    this.applyChartHeight();
+
+    try {
+      this.applyOverlays();
+    } catch (error) {
+      console.error('overlay refresh failed', error);
+      throw error;
+    }
+
+    this.restoreVisibleRange(captured);
+    this.resize();
+  }
+
   ensureOverlayPane(paneIndex) {
     if (!this.chart || typeof this.chart.addPane !== 'function') return paneIndex;
     while (this.chart.panes().length <= paneIndex) {
