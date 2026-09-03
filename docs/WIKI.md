@@ -632,6 +632,13 @@ After updates, users may need to clear browser cache to see changes. Hard refres
 
 ## Changelog
 
+### Signal engine + backtest (research, first slice)
+- Extensible strategies: EMA golden/death (true EMA50), MACD from close, RSI recovery, Ichimoku pack fields
+- Consensus 0–100 with breakdown; chart markers + strategy/horizon panel
+- Walk-forward backtest vs buy-and-hold and naive; `npm run backtest`
+- **Honesty:** on the CI fixture, nothing beat buy-and-hold. Status **doing**, not done
+- Supertrend/ATR not implemented (open)
+
 ### Shipped (Kevin chart ask)
 - Lightweight Charts replaces the custom canvas
 - Default viewport last few days; pan/zoom time axis
