@@ -25,8 +25,9 @@ Scoreboard is a crypto market analysis and forecasting dashboard built with vani
 - `forecast.js` - Forecasting engine (naive baseline, trend model, MAE/MAPE)
 - `signals/` - Extensible signal engine (EMA, MACD, RSI recovery, Ichimoku) + consensus
 - `backtest.js` - Walk-forward backtest vs buy-and-hold and naive baseline
-- `ingest.js` - Data loading from overlay and repo paths
-- `store.js` - Local JSON storage (forecasts, errors, universe)
+- `ingest.js` - Pack-file parsers (CSV/JSON on disk). No network.
+- `okx-adapter.js` / `fallback-adapters.js` / `refresh.js` - Incremental ingest (OKX live; ETF/CG fallback)
+- `store.js` - Local JSON storage (forecasts, errors, universe, ingest_watermarks, ingest_series)
 - `store-adapter.js` - Abstraction layer for local/Firestore backends
 
 **View** (`public/js/view.js`, `public/js/chart-view.js`)
@@ -47,11 +48,73 @@ Scoreboard is a crypto market analysis and forecasting dashboard built with vani
 
 ## Data Ingestion
 
-### Source Priority
+### Current behavior (before incremental refresh)
 
-1. **Overlay path:** `/workspace/scoreboard/` (Flow pack on shared computer)
-2. **Repo path:** `./data/` (local development)
-3. **Error:** If file missing (no silent fallback)
+`src/model/ingest.js` has **zero network calls** (no `fetch` / `https` / `axios`). Load Data used to re-read the same static Flow-pack CSV/JSON files from disk (`/workspace/scoreboard` overlay, then repo `data/`). That was a static replay of whatever Flow last dropped: no live OKX/Farside/CoinGecko fetch, no cursor, no watermark, no dedup.
+
+Pack files remain a **seed / fallback** for series that are not live (alt daily indicators, ratios, correlations) and for ETF/CoinGecko when the public page/API cannot be fetched.
+
+### New architecture
+
+```
+POST /api/refresh
+    → source adapters.fetchSince(cursor)
+    → normalize to existing series shape
+    → validate monotonic timestamps + flag gaps (never invent / zero-fill)
+    → upsert ingest_series by natural key (symbol+interval+timestamp)
+    → atomically write ingest_watermarks only after that page succeeds
+GET /api/indicators  (and the chart)
+    → seriesModel.load() merges ingest_series over the pack
+    → never reads the raw dump as the Load Data path
+```
+
+**Adapter interface**
+
+```
+{ id, symbol, interval, mode, fetchSince(cursor) -> { rows, nextCursor } }
+```
+
+- `cursor` for incremental sources: `{ lastTimestamp, since }` where `since` is `lastTimestamp` minus a 3-bar safety overlap.
+- `nextCursor` is `{ lastTimestamp }` for OKX. ETF and CoinGecko return `nextCursor: null` — they do **not** fake a cursor.
+
+**Watermark store** (`store/ingest_watermarks.json`, Firestore-migratable collection `ingest_watermarks`)
+
+Per `(source, symbol, interval)`:
+
+```
+{ lastTimestamp, lastSuccessAt, rowCount }
+```
+
+Advanced only after fetch + normalize + upsert of the whole page succeeds. A failed HTTP call leaves the previous watermark in place.
+
+**Refresh API (polling, not SSE)**
+
+```
+POST /api/refresh?source=&symbol=&interval=
+GET  /api/refresh/status
+```
+
+`POST` runs the selected adapters (all of them if no filter) and returns per-source progress, `lastSuccessAt`, and `lastSuccessAgeMs`. `GET /api/refresh/status` is the poll/status snapshot. Load Data calls `POST /api/refresh` first, renders last-success age per source, then reloads the chart from `/api/indicators` (store-backed).
+
+No API keys in client JS. OKX public endpoints need none. Keyed sources are out of scope and must stay server-only if ever added.
+
+### Per-source incremental vs fallback
+
+| Source | Adapter id | Mode | What it does |
+|---|---|---|---|
+| OKX BTC-USDT-SWAP candles | `okx-candles` (`1h`, `1d`) | **incremental** | Live `GET https://www.okx.com/api/v5/market/history-candles?instId=BTC-USDT-SWAP&bar=1H\|1D`. Second refresh sends `before=<watermark - 3 bars>` so it only requests the delta (plus overlap). Public, no key. |
+| OKX BTC-USDT-SWAP OI | `okx-oi` (`1h`, `1d`) | **incremental** | Live `GET https://www.okx.com/api/v5/rubik/stat/contracts/open-interest-history?instId=BTC-USDT-SWAP&period=1H\|1D` with `begin=` when a cursor exists. `/api/v5/public/open-interest-history` is **404** (verified). Public, no key. |
+| ETF net flows (Farside) | `etf-farside` (BTC, ETH) | **bounded-overlap fallback** | `fetchSince` **ignores** the cursor. Re-fetches/re-parses the whole small HTML table (or the pack CSV if Cloudflare/HTML fails), then dedupes by date. `nextCursor` is always `null`. Not claimed as incremental. |
+| CoinGecko top100 | `coingecko-top100` | **bounded-overlap fallback** | `fetchSince` **ignores** the cursor. Re-fetches the whole top100 markets page. On **429**, re-parses `cg_top100_universe.json`. Categories stay blank when missing. `nextCursor` is always `null`. Not claimed as incremental. |
+
+Do not invent series. ETH 1h, multi-exchange OI, and alt hourly candles are still absent.
+
+### Source Priority (pack seed)
+
+1. **Ingest store** after a refresh (`ingest_series` / `universe`)
+2. **Overlay path:** `/workspace/scoreboard/` (Flow pack on shared computer)
+3. **Repo path:** `./data/` (local development)
+4. **Error:** If a required symbol+interval still has no rows (no silent fallback, no zeros)
 
 Kevin's shared computer has Flow pack at `/workspace/scoreboard/`. For local development, place files in `./data/`.
 
@@ -369,8 +432,10 @@ generateForecast(data, horizonDays) {
 
 **Collections:**
 - `forecasts.json` - Forecast predictions and metadata
-- `error_logs.json` - MAE/MAPE calculations
+- `error_logs.json` - MAE/MAPE plus ingest gap / refresh errors
 - `universe.json` - Crypto universe data
+- `ingest_watermarks.json` - Per-source `{ lastTimestamp, lastSuccessAt, rowCount }`
+- `ingest_series.json` - Upserted adapter rows (natural key `source:symbol:interval:timestamp`)
 
 **Interface:**
 ```javascript
@@ -417,8 +482,21 @@ See `FIREBASE_SETUP.md` for complete migration guide including:
 ```
 GET /api/series?symbol=BTC&interval=1d&format=json
 GET /api/series?symbol=BTC&interval=1d&format=csv
+GET /api/series?symbol=BTC&interval=1h&since=1700000000000
+GET /api/series?symbol=BTC&interval=1h&sinceCursor=okx-candles:BTC:1h
 GET /api/indicators?symbol=BTC&interval=1d
 ```
+
+`since=<timestamp>` and `sinceCursor=<watermark id>` return only rows **after** that point (exclusive), from the same store/series data as the chart.
+
+### Incremental refresh
+```
+POST /api/refresh
+POST /api/refresh?source=okx-candles&symbol=BTC&interval=1h
+GET  /api/refresh/status
+```
+
+Polling status (not SSE). `POST` is synchronous and returns the same per-source payload as status, including `requestedSince` / `requestUrls` so a second OKX refresh can be shown to request only the delta.
 
 ### Forecasting
 ```
@@ -596,8 +674,8 @@ After updates, users may need to clear browser cache to see changes. Hard refres
 
 ### Load Data Does Nothing
 - **Symptom:** Button click has no effect
-- **Cause:** Event listener not wired
-- **Fix:** Verify controller `setupEventListeners()` calls `updateOverview()`
+- **Cause:** Event listener not wired, or refresh hung
+- **Fix:** Load Data calls `POST /api/refresh` then `GET /api/indicators`. Check `#refresh-status` for per-source last-success age. Verify controller `setupEventListeners()` calls `reloadSelected()`.
 
 ### Overlays Don't Toggle
 - **Symptom:** Checking boxes doesn't change chart
@@ -667,6 +745,14 @@ After updates, users may need to clear browser cache to see changes. Hard refres
 - ✅ HiDPI canvas rendering
 - ✅ Symbol list from the pack (12 names in the Flow indicators file)
 
+### Incremental refresh (this PR)
+- Source adapters + `ingest_watermarks` / `ingest_series`
+- OKX BTC-USDT-SWAP candles + OI are live incremental (public, no key)
+- ETF (Farside) and CoinGecko top100 use the same interface as a bounded-overlap fallback — cursor is not faked
+- Load Data refreshes sources first, then reads the store
+- Export: `since` / `sinceCursor`
+- Status: OKX incremental **done**. ETF/CG fallback **doing** (not incremental)
+
 ### Initial Release
 - ✅ Vanilla JS MVC architecture
 - ✅ Technical indicators (MA20/50/100/200)
@@ -678,5 +764,5 @@ After updates, users may need to clear browser cache to see changes. Hard refres
 ---
 
 **Last Updated:** 2026-09-03  
-**Version:** v1.2 (signal engine + backtest, research only)  
-**Status:** Kevin chart ask done on localhost. Not Pooli.
+**Version:** v1.3 (incremental OKX refresh)  
+**Status:** Not Pooli. No keys client-side. No trades.

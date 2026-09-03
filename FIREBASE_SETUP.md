@@ -10,6 +10,8 @@ By default, Scoreboard uses **local JSON files** in the `store/` directory:
 - `store/forecasts.json`
 - `store/error_logs.json`
 - `store/universe.json`
+- `store/ingest_watermarks.json`
+- `store/ingest_series.json`
 
 This works out of the box with no configuration.
 
@@ -261,7 +263,7 @@ After configuration, check logs for:
 
 ```
 ✓ Firestore connected to project: scoreboard-xxxxx
-✓ Collections initialized: forecasts, error_logs, universe
+✓ Collections initialized: forecasts, error_logs, universe, ingest_watermarks, ingest_series
 ```
 
 If you see errors, verify:

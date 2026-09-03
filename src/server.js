@@ -12,7 +12,9 @@ import {
   handleGetPredictedSeries,
   handleGetSymbols,
   handleGetTradingSignals,
-  handleGetBacktest
+  handleGetBacktest,
+  handlePostRefresh,
+  handleGetRefreshStatus
 } from './controller/api.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -39,6 +41,8 @@ app.get('/api/predicted-series', handleGetPredictedSeries);
 app.get('/api/symbols', handleGetSymbols);
 app.get('/api/trading-signals', handleGetTradingSignals);
 app.get('/api/backtest', handleGetBacktest);
+app.post('/api/refresh', handlePostRefresh);
+app.get('/api/refresh/status', handleGetRefreshStatus);
 
 app.get('/health', (req, res) => {
   res.json({ status: 'ok', timestamp: Date.now() });

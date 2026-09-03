@@ -118,8 +118,77 @@ export class LocalStore {
       return true;
     });
   }
+
+  upsert(id, item) {
+    if (!this.cache) {
+      this._load();
+    }
+
+    const index = this.cache.items.findIndex((existing) => existing.id === id);
+    const now = Date.now();
+    if (index === -1) {
+      const newItem = {
+        ...item,
+        id,
+        createdAt: item.createdAt || now,
+        updatedAt: now
+      };
+      this.cache.items.push(newItem);
+      this._save();
+      return { item: newItem, inserted: true };
+    }
+
+    this.cache.items[index] = {
+      ...this.cache.items[index],
+      ...item,
+      id,
+      updatedAt: now
+    };
+    this._save();
+    return { item: this.cache.items[index], inserted: false };
+  }
+
+  upsertMany(items) {
+    if (!this.cache) {
+      this._load();
+    }
+
+    const byId = new Map(this.cache.items.map((existing, index) => [existing.id, index]));
+    let inserted = 0;
+    let updated = 0;
+    const now = Date.now();
+
+    for (const item of items || []) {
+      const id = item.id;
+      if (id == null) continue;
+      if (byId.has(id)) {
+        const index = byId.get(id);
+        this.cache.items[index] = {
+          ...this.cache.items[index],
+          ...item,
+          id,
+          updatedAt: now
+        };
+        updated += 1;
+      } else {
+        this.cache.items.push({
+          ...item,
+          id,
+          createdAt: item.createdAt || now,
+          updatedAt: now
+        });
+        byId.set(id, this.cache.items.length - 1);
+        inserted += 1;
+      }
+    }
+
+    this._save();
+    return { inserted, updated, total: this.cache.items.length };
+  }
 }
 
 export const forecastStore = new LocalStore('forecasts');
 export const errorLogStore = new LocalStore('error_logs');
 export const universeStore = new LocalStore('universe');
+export const ingestWatermarkStore = new LocalStore('ingest_watermarks');
+export const ingestSeriesStore = new LocalStore('ingest_series');
