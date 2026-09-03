@@ -1,6 +1,7 @@
 import { seriesModel } from '../model/series.js';
 import { generateForecast, createForecastCard, generatePredictedSeries } from '../model/forecast.js';
 import { forecastStore } from '../model/store-adapter.js';
+import { getRefreshRuntime } from '../model/refresh.js';
 import {
   evaluateWalkForward,
   evaluateAll,
@@ -11,11 +12,12 @@ import {
 import { runFullBacktest, loadBacktestSeries, formatBacktestReport } from '../model/backtest.js';
 
 export function handleGetSeries(req, res) {
-  const { symbol = 'BTC', interval = '1d', from, to, fields } = req.query;
+  const { symbol = 'BTC', interval = '1d', from, to, fields, since, sinceCursor } = req.query;
   
   try {
     seriesModel.load();
-    const series = seriesModel.getSeries(symbol, interval, from, to, fields);
+    const sinceExclusive = seriesModel.resolveExportSince({ since, sinceCursor });
+    const series = seriesModel.getSeries(symbol, interval, from, to, fields, { sinceExclusive });
     
     const format = req.query.format || 'json';
     
@@ -39,6 +41,8 @@ export function handleGetSeries(req, res) {
         symbol,
         interval,
         count: series.length,
+        since: sinceExclusive,
+        sinceCursor: sinceCursor || null,
         data: series
       });
     }
@@ -222,6 +226,36 @@ export function handleGetTradingSignals(req, res) {
   } catch (error) {
     res.status(error.message && error.message.startsWith('No ') ? 404 : 500)
       .json({ error: error.message });
+  }
+}
+
+function refreshFilterFromReq(req) {
+  const query = req.query || {};
+  const body = req.body || {};
+  return {
+    source: query.source || body.source || undefined,
+    symbol: query.symbol || body.symbol || undefined,
+    interval: query.interval || body.interval || undefined
+  };
+}
+
+export async function handlePostRefresh(req, res) {
+  try {
+    const runtime = getRefreshRuntime();
+    const result = await runtime.runRefresh(refreshFilterFromReq(req));
+    seriesModel.load();
+    res.json(result);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+}
+
+export function handleGetRefreshStatus(req, res) {
+  try {
+    const runtime = getRefreshRuntime();
+    res.json(runtime.getStatus());
+  } catch (error) {
+    res.status(500).json({ error: error.message });
   }
 }
 

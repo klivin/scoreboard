@@ -104,6 +104,37 @@ h1 {
   color: #555;
 }
 
+.refresh-status {
+  margin: 0 0 20px;
+  padding: 12px 14px;
+  background: #f8f9fa;
+  border: 1px solid #e0e0e0;
+  border-radius: 6px;
+  font-size: 0.9rem;
+  color: #444;
+}
+
+.refresh-status.hidden {
+  display: none;
+}
+
+.refresh-status h3 {
+  font-size: 0.95rem;
+  margin-bottom: 8px;
+  color: #333;
+}
+
+.refresh-status ul {
+  list-style: none;
+  display: grid;
+  gap: 4px;
+}
+
+.refresh-status .src-ok { color: #047857; }
+.refresh-status .src-error { color: #9f1239; }
+.refresh-status .src-running { color: #1d4ed8; }
+.refresh-status .src-fallback { color: #92400e; }
+
 .controls input[type="text"] {
   padding: 8px 12px;
   border: 2px solid #e0e0e0;

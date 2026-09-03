@@ -28,6 +28,61 @@ export class AppController {
     alert.innerHTML = '';
   }
 
+  formatAge(ms) {
+    if (ms == null) return 'never';
+    const sec = Math.round(ms / 1000);
+    if (sec < 60) return `${sec}s ago`;
+    const min = Math.round(sec / 60);
+    if (min < 60) return `${min}m ago`;
+    const hr = Math.round(min / 60);
+    if (hr < 48) return `${hr}h ago`;
+    return `${Math.round(hr / 24)}d ago`;
+  }
+
+  renderRefreshStatus(payload, heading = 'Source refresh') {
+    const panel = document.getElementById('refresh-status');
+    if (!panel) return;
+    const sources = payload && (payload.sources || payload.ran) ? (payload.sources || []) : [];
+    if (!sources.length) {
+      panel.classList.add('hidden');
+      return;
+    }
+
+    const rows = sources.map((src) => {
+      const mode = src.mode === 'incremental' ? 'incremental' : 'bounded-overlap fallback';
+      const age = this.formatAge(src.lastSuccessAgeMs);
+      const cls = src.status === 'error' ? 'src-error' : (src.mode === 'incremental' ? 'src-ok' : 'src-fallback');
+      const extra = src.error
+        ? ` — ${src.error}`
+        : ` — last success ${age}${src.rowCount != null ? `, ${src.rowCount} rows` : ''}`;
+      return `<li class="${cls}"><strong>${src.id}</strong> ${src.symbol} ${src.interval} (${mode})${extra}</li>`;
+    }).join('');
+
+    panel.innerHTML = `<h3>${heading}</h3><ul>${rows}</ul>`;
+    panel.classList.remove('hidden');
+  }
+
+  async refreshSources() {
+    this.renderRefreshStatus({
+      sources: [{
+        id: 'refresh',
+        symbol: 'ALL',
+        interval: '',
+        mode: 'incremental',
+        status: 'running',
+        lastSuccessAgeMs: null
+      }]
+    }, 'Refreshing sources…');
+
+    const response = await fetch('/api/refresh', { method: 'POST' });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok && !result.sources) {
+      throw new Error(result.error || 'Refresh failed');
+    }
+    this.renderRefreshStatus(result, 'Source refresh');
+    return result;
+  }
+
   async loadData(symbol, interval = '1d') {
     const response = await fetch(`/api/indicators?symbol=${encodeURIComponent(symbol)}&interval=${encodeURIComponent(interval)}`);
     const result = await response.json().catch(() => ({}));
@@ -236,6 +291,21 @@ export class AppController {
     this.views.chart.render();
 
     try {
+      try {
+        await this.refreshSources();
+      } catch (refreshError) {
+        this.renderRefreshStatus({
+          sources: [{
+            id: 'refresh',
+            symbol: 'ALL',
+            interval: '',
+            mode: 'incremental',
+            status: 'error',
+            error: refreshError.message,
+            lastSuccessAgeMs: null
+          }]
+        }, 'Source refresh failed');
+      }
       await this.updateOverview(symbol, interval);
     } catch (error) {
       const message = error.message || `No data for ${symbol} ${interval}`;

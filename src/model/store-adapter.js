@@ -43,11 +43,11 @@ export class StoreAdapter {
         }
         
         const { initializeApp } = await import('firebase/app');
-        const { getFirestore, collection: firestoreCollection, getDocs, addDoc, updateDoc, deleteDoc, doc, query, where } = await import('firebase/firestore');
+        const { getFirestore, collection: firestoreCollection, getDocs, addDoc, updateDoc, deleteDoc, doc, query, where, setDoc, getDoc } = await import('firebase/firestore');
         
         const app = initializeApp(this.config.firebase);
         this._firestore = getFirestore(app);
-        this._firestoreLib = { collection: firestoreCollection, getDocs, addDoc, updateDoc, deleteDoc, doc, query, where };
+        this._firestoreLib = { collection: firestoreCollection, getDocs, addDoc, updateDoc, deleteDoc, doc, query, where, setDoc, getDoc };
         
         return this._firestore;
       },
@@ -111,6 +111,32 @@ export class StoreAdapter {
         
         const querySnapshot = await getDocs(q);
         return querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      },
+
+      async upsert(id, item) {
+        await this._initFirestore();
+        const { doc, setDoc } = this._firestoreLib;
+        const payload = {
+          ...item,
+          id,
+          updatedAt: Date.now()
+        };
+        await setDoc(doc(this._firestore, this.collection, id), payload, { merge: true });
+        return { item: payload, inserted: true };
+      },
+
+      async upsertMany(items) {
+        let inserted = 0;
+        let updated = 0;
+        for (const item of items || []) {
+          if (!item || item.id == null) continue;
+          const existing = await this.getById(item.id);
+          await this.upsert(item.id, item);
+          if (existing) updated += 1;
+          else inserted += 1;
+        }
+        const all = await this.getAll();
+        return { inserted, updated, total: all.length };
       }
     };
   }
@@ -124,3 +150,5 @@ export const storeAdapter = new StoreAdapter({
 export const forecastStore = storeAdapter.getStore('forecasts');
 export const errorLogStore = storeAdapter.getStore('error_logs');
 export const universeStore = storeAdapter.getStore('universe');
+export const ingestWatermarkStore = storeAdapter.getStore('ingest_watermarks');
+export const ingestSeriesStore = storeAdapter.getStore('ingest_series');

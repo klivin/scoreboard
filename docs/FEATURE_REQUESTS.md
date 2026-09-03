@@ -360,6 +360,44 @@ npm start
 
 ---
 
+## Live Incremental Refresh
+
+### Incremental ingest (source adapters + watermark)
+**Status:** doing (OKX incremental **done**; ETF/CoinGecko remain fallback)  
+**Request:** Load Data must stop replaying the same static Flow-pack dump. `src/model/ingest.js` has no network calls. Refresh must become real incremental ingest with source adapters and a persisted watermark.
+
+**Must ship:**
+1. Adapter interface `{ id, symbol, interval, fetchSince(cursor) -> { rows, nextCursor } }`
+2. **OKX BTC/USDT swap** public candles + OI: true incremental fetch (public, no key)
+3. **ETF (Farside)** and **CoinGecko top100**: same interface, but `fetchSince` is a bounded-overlap fallback (re-fetch/re-parse the whole small file, dedupe by natural key). Do **not** fake a cursor. Do **not** mark these done as incremental.
+4. Watermark store `ingest_watermarks`: `(source, symbol, interval) -> { lastTimestamp, lastSuccessAt, rowCount }`. Advance atomically only after fetch+normalize+upsert of the whole page.
+5. Safety overlap, dedupe/upsert by `symbol+interval+timestamp`, monotonic check, gaps flagged to `error_log` (never invent bars, never zero-fill)
+6. `POST /api/refresh` + `GET /api/refresh/status` (polling). Load Data calls refresh first, shows last-success age, then reads the store — never the raw dump.
+7. Series export accepts `since=<timestamp>` or `sinceCursor=<id>`
+8. No API keys in client JS. No trades. No invented series. Not Pooli.
+
+**Per-source status:**
+- OKX candles + OI: **done** (true incremental; public `history-candles` + `rubik/.../open-interest-history`; watermark + overlap; second refresh sends `before=` / `begin=`). Verified live: 1h candles URL returned 6 rows, sample close 80853 at 2026-09-03 16:00:00 UTC; OI 6 rows, `oi` 2.925M contracts. `npm test` mocks HTTP (80/80).
+- ETF Farside: **doing** (bounded-overlap fallback, `nextCursor` is null, cursor ignored; Cloudflare often blocks the HTML scrape so pack CSV is re-parsed). Not incremental.
+- CoinGecko top100: **doing** (bounded-overlap fallback, 429-limited, `nextCursor` is null). Not incremental.
+
+**Design:** `docs/WIKI.md` (Data Ingestion — incremental refresh)
+
+**Kevin check (second refresh only pulls new rows):**
+```
+# 1) first incremental page (no watermark)
+curl -sS -X POST 'http://localhost:3000/api/refresh?source=okx-candles&symbol=BTC&interval=1h' | python3 -m json.tool
+# note sources[0].lastTimestamp, rowCount, requestUrls (no before=)
+
+# 2) immediately again — same rowCount, requestUrls include before=<lastTimestamp - 3h>
+curl -sS -X POST 'http://localhost:3000/api/refresh?source=okx-candles&symbol=BTC&interval=1h' | python3 -m json.tool
+
+# 3) export only rows after the watermark
+curl -sS 'http://localhost:3000/api/series?symbol=BTC&interval=1h&sinceCursor=okx-candles:BTC:1h&format=json'
+```
+
+---
+
 ## Future Enhancements
 
 ### Supertrend/ATR regime filter (signal strategy e)
@@ -369,18 +407,21 @@ npm start
 **Priority:** Medium
 
 ---
+
+### 🔲 5x/Day Probe
 **Status:** open  
 **Request:** Automated data refresh 5 times per day  
 **Implementation Ideas:**
-- Cron job or scheduled task
-- Re-fetch Flow pack files
-- Update local cache
+- Cron job or scheduled task calling `POST /api/refresh`
+- Incremental OKX watermark already exists; schedule is the remaining work
 - Trigger forecast recalculation
 - Log refresh status
 
 **Blockers:**
-- Flow pack update frequency unknown
-- Need automated data pipeline
+- Scheduler / cron not wired
+- ETF and CoinGecko are still bounded-overlap fallback, not true incremental
+
+**Depends on:** Live Incremental Refresh (OKX watermark + `/api/refresh`)
 
 **Priority:** Medium (nice-to-have for production)
 

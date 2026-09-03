@@ -7,6 +7,8 @@ import {
   pickOiContracts,
   pickVolume
 } from './overlays.js';
+import { applySeriesStoreToPack } from './ingest-store.js';
+import { ingestSeriesStore, ingestWatermarkStore, universeStore } from './store-adapter.js';
 
 function isBtcSymbol(symbol) {
   const upper = String(symbol || '').toUpperCase();
@@ -75,7 +77,30 @@ export function normalizeCandleRow(row) {
   };
 }
 
-function applyRangeAndFields(series, from, to, fields) {
+function parseSinceExclusive(since) {
+  if (since == null || since === '') return null;
+  if (typeof since === 'number' && Number.isFinite(since)) return since;
+  const asNumber = Number(since);
+  if (Number.isFinite(asNumber) && String(since).trim() !== '') {
+    if (asNumber > 1e11) return asNumber;
+    if (asNumber > 1e9) return asNumber * 1000;
+    if (/^\d+$/.test(String(since).trim()) && asNumber > 0) return asNumber;
+  }
+  const parsed = Date.parse(since);
+  return Number.isNaN(parsed) ? null : parsed;
+}
+
+export function resolveSinceCursor(sinceCursor, watermarkItems = []) {
+  if (!sinceCursor) return null;
+  const items = watermarkItems || [];
+  const exact = items.find((item) => item.id === sinceCursor);
+  if (exact && Number.isFinite(exact.lastTimestamp)) return exact.lastTimestamp;
+  const prefix = items.find((item) => item.id && item.id.startsWith(String(sinceCursor)));
+  if (prefix && Number.isFinite(prefix.lastTimestamp)) return prefix.lastTimestamp;
+  return null;
+}
+
+function applyRangeAndFields(series, from, to, fields, sinceExclusive = null) {
   let filtered = series.filter((row) => row && row.timestamp);
 
   if (from) {
@@ -83,6 +108,10 @@ function applyRangeAndFields(series, from, to, fields) {
     if (!Number.isNaN(fromTs)) {
       filtered = filtered.filter((row) => row.timestamp >= fromTs);
     }
+  }
+
+  if (sinceExclusive != null && Number.isFinite(sinceExclusive)) {
+    filtered = filtered.filter((row) => row.timestamp > sinceExclusive);
   }
 
   if (to) {
@@ -118,6 +147,7 @@ export class SeriesModel {
 
   load() {
     this.data = loadAllData();
+    applySeriesStoreToPack(this.data, ingestSeriesStore.getAll());
     this.lastLoaded = Date.now();
     return this.data;
   }
@@ -147,10 +177,13 @@ export class SeriesModel {
     return candles.map(normalizeCandleRow).filter((row) => row && row.timestamp);
   }
 
-  getSeries(symbol, interval = '1d', from = null, to = null, fields = null) {
+  getSeries(symbol, interval = '1d', from = null, to = null, fields = null, options = {}) {
     this.ensureLoaded();
 
     const intervalNorm = interval === '1h' ? '1h' : '1d';
+    const sinceExclusive = options.sinceExclusive != null
+      ? options.sinceExclusive
+      : parseSinceExclusive(options.since);
     let series = [];
 
     if (intervalNorm === '1h') {
@@ -168,13 +201,13 @@ export class SeriesModel {
       throw new Error(missingSeriesMessage(symbol, intervalNorm));
     }
 
-    const ranged = applyRangeAndFields(series, from, to, null);
+    const ranged = applyRangeAndFields(series, from, to, null, sinceExclusive);
     const withOverlays = attachFlowOverlays(ranged, {
       etfRows: this.getEtfRows(symbol),
       oiRows: isBtcSymbol(symbol) ? this.getOiRows(intervalNorm) : [],
       interval: intervalNorm
     });
-    return applyRangeAndFields(withOverlays, null, null, fields);
+    return applyRangeAndFields(withOverlays, null, null, fields, sinceExclusive);
   }
 
   getIndicators(symbol, interval = '1d') {
@@ -278,6 +311,19 @@ export class SeriesModel {
   getUniverse() {
     this.ensureLoaded();
 
+    const stored = (universeStore.getAll() || [])
+      .filter((item) => item && (item.coins || item.data))
+      .sort((a, b) => (b.updated || b.lastSuccessAt || 0) - (a.updated || a.lastSuccessAt || 0));
+    if (stored[0]) {
+      const latest = stored[0];
+      return {
+        updated: latest.updated || latest.timestamp || Date.now(),
+        coins: latest.coins || latest.data || [],
+        note: latest.note || null,
+        source: latest.source || 'coingecko-top100'
+      };
+    }
+
     if (this.data.universe && !this.data.universe.missing && this.data.universe.data) {
       return this.data.universe.data;
     }
@@ -287,6 +333,14 @@ export class SeriesModel {
       coins: [],
       note: 'Universe data missing - CoinGecko 429 left most categories blank'
     };
+  }
+
+  resolveExportSince({ since, sinceCursor } = {}) {
+    if (sinceCursor) {
+      const fromCursor = resolveSinceCursor(sinceCursor, ingestWatermarkStore.getAll());
+      if (fromCursor != null) return fromCursor;
+    }
+    return parseSinceExclusive(since);
   }
 }
 
