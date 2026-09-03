@@ -235,6 +235,20 @@ button:hover {
   display: none;
 }
 
+.forecast-rationale-strip {
+  margin-top: 12px;
+  padding: 12px 16px;
+  background: #f5f3ff;
+  border: 1px solid #c4b5fd;
+  border-radius: 6px;
+  font-size: 0.9rem;
+  line-height: 1.5;
+}
+
+.forecast-rationale-strip.hidden {
+  display: none;
+}
+
 .signal-vote {
   margin-top: 6px;
 }
@@ -732,6 +746,72 @@ button:hover {
 .inv-maps {
   margin-top: 10px;
   padding-left: 18px;
+}
+
+.fc-toolbar {
+  flex-wrap: wrap;
+}
+
+.fc-table tbody tr {
+  cursor: pointer;
+}
+
+.fc-table tbody tr:hover {
+  background: #f5f3ff;
+}
+
+.fc-row-selected {
+  background: #ede9fe;
+}
+
+.fc-status {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
+.fc-status-matured {
+  background: #d1fae5;
+  color: #065f46;
+}
+
+.fc-status-early {
+  background: #e0e7ff;
+  color: #3730a3;
+}
+
+.fc-status-missing {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.fc-detail {
+  margin-top: 20px;
+  padding: 16px;
+  border: 1px solid #e0e0e0;
+  border-radius: 8px;
+  background: #fafafa;
+}
+
+.fc-detail.hidden {
+  display: none;
+}
+
+.fc-filter-note,
+.fc-data-note {
+  margin-top: 12px;
+}
+
+.fc-fixture {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  font-size: 0.7rem;
+  background: #fef3c7;
+  color: #92400e;
 }
 
 @media (max-width: 768px) {

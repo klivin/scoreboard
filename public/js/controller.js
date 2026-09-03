@@ -9,6 +9,7 @@ export class AppController {
     this.currentInterval = '1d';
     this.currentHorizon = 7;
     this.investments = null;
+    this.forecasts = null;
   }
 
   showPageError(message) {
@@ -124,7 +125,7 @@ export class AppController {
   }
 
   async generateForecast(symbol, horizon) {
-    const response = await fetch(`/api/forecast?symbol=${encodeURIComponent(symbol)}&horizon=${horizon}`);
+    const response = await fetch(`/api/forecast?symbol=${encodeURIComponent(symbol)}&horizon=${encodeURIComponent(horizon)}`);
     if (!response.ok) throw new Error('Failed to generate forecast');
     return response.json();
   }
@@ -133,11 +134,10 @@ export class AppController {
     try {
       const response = await fetch('/api/forecasts');
       if (!response.ok) throw new Error('Failed to load forecasts');
-      const result = await response.json();
-      return result.forecasts;
+      return response.json();
     } catch (error) {
       console.error('Error loading forecasts:', error);
-      return [];
+      return { forecasts: [], count: 0, note: 'Could not load forecast history.' };
     }
   }
 
@@ -281,8 +281,49 @@ export class AppController {
   }
 
   async updateForecasts() {
-    const forecasts = await this.loadForecasts();
-    this.views.forecast.render(forecasts);
+    const payload = await this.loadForecasts();
+    if (this.forecasts) {
+      this.forecasts.ingestPayload(payload);
+    }
+  }
+
+  switchTab(tab) {
+    document.querySelectorAll('.tab-btn').forEach((btn) => {
+      btn.classList.toggle('active', btn.dataset.tab === tab);
+    });
+    document.querySelectorAll('.tab-content').forEach((panel) => {
+      panel.classList.toggle('active', panel.id === tab);
+    });
+  }
+
+  async openForecastOnOverview(payload) {
+    if (!payload) return;
+    this.switchTab('overview');
+    if (this.views.chart.showForecastRationale) {
+      this.views.chart.showForecastRationale(payload);
+    }
+
+    const symbol = payload.symbol || this.getSelectedSymbol();
+    const select = document.getElementById('symbol-select');
+    if (select && symbol) select.value = symbol;
+
+    try {
+      if (!this.views.chart.data || this.currentSymbol !== symbol) {
+        await this.updateOverview(symbol, this.getSelectedInterval());
+        if (this.views.chart.showForecastRationale) {
+          this.views.chart.showForecastRationale(payload);
+        }
+      }
+    } catch (error) {
+      this.showPageError(error.message || `No Overview series for ${symbol}`);
+    }
+
+    if (this.views.chart.jumpToTimestamp) {
+      this.views.chart.jumpToTimestamp(payload.chartJumpTimestamp);
+    }
+    if (this.views.chart.showForecastRationale) {
+      this.views.chart.showForecastRationale(payload);
+    }
   }
 
   async updateUniverse() {
@@ -356,15 +397,6 @@ export class AppController {
       });
     }
 
-    const forecastBtn = document.getElementById('generate-forecast-btn');
-    if (forecastBtn) {
-      forecastBtn.addEventListener('click', async () => {
-        const symbol = this.getSelectedSymbol();
-        const horizon = parseInt(document.getElementById('horizon-select').value, 10);
-        await this.handleGenerateForecast(symbol, horizon);
-      });
-    }
-
     Object.keys(TOGGLE_OPTION_MAP).forEach((id) => {
       const checkbox = document.getElementById(id);
       if (!checkbox) return;
@@ -414,12 +446,7 @@ export class AppController {
     document.querySelectorAll('.tab-btn').forEach((btn) => {
       btn.addEventListener('click', async () => {
         const tab = btn.dataset.tab;
-
-        document.querySelectorAll('.tab-btn').forEach((b) => b.classList.remove('active'));
-        document.querySelectorAll('.tab-content').forEach((c) => c.classList.remove('active'));
-
-        btn.classList.add('active');
-        document.getElementById(tab).classList.add('active');
+        this.switchTab(tab);
 
         if (tab === 'forecast') {
           await this.updateForecasts();

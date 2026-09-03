@@ -1,6 +1,7 @@
 import { seriesModel } from '../model/series.js';
 import { generateForecast, createForecastCard, generatePredictedSeries } from '../model/forecast.js';
-import { forecastStore } from '../model/store-adapter.js';
+import { daysToHorizon, horizonToDays } from '../model/forecast-schema.js';
+import { createAndStoreForecast, ensureForecastHistory, forecastsToCsv } from '../model/forecast-history.js';
 import { getRefreshRuntime } from '../model/refresh.js';
 import {
   evaluateWalkForward,
@@ -93,35 +94,35 @@ export function handleGetSignals(req, res) {
 }
 
 export function handleGetForecast(req, res) {
-  const { symbol = 'BTC', horizon = '7' } = req.query;
-  const horizonDays = parseInt(horizon, 10);
-  
+  const { symbol = 'BTC', horizon = 'weekly' } = req.query;
+  const horizonDays = horizonToDays(horizon);
+  const horizonKey = daysToHorizon(horizonDays);
+
   try {
-    const data = seriesModel.getIndicators(symbol);
-    
-    if (data.length === 0) {
-      res.status(404).json({ error: 'No data available for symbol' });
-      return;
+    const record = createAndStoreForecast({ symbol, horizon: horizonKey });
+    let forecast = null;
+    let card = null;
+    try {
+      const data = seriesModel.getIndicators(symbol);
+      if (data.length) {
+        forecast = generateForecast(data, horizonDays);
+        card = createForecastCard(symbol, data, horizonDays);
+      }
+    } catch {
+      // record already persisted from fixture/series; card is optional
     }
-    
-    const forecast = generateForecast(data, horizonDays);
-    const card = createForecastCard(symbol, data, horizonDays);
-    
-    forecastStore.add({
-      symbol,
-      horizonDays,
-      forecast: card,
-      timestamp: Date.now()
-    });
-    
+
     res.json({
       symbol,
       horizonDays,
+      horizon: horizonKey,
       forecast,
-      card
+      card,
+      record
     });
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    res.status(error.message && error.message.startsWith('No ') ? 404 : 500)
+      .json({ error: error.message });
   }
 }
 
@@ -151,11 +152,17 @@ export function handleGetUniverse(req, res) {
 
 export function handleGetForecasts(req, res) {
   try {
-    const forecasts = forecastStore.getAll();
-    res.json({
-      count: forecasts.length,
-      forecasts: forecasts.slice(-20)
-    });
+    const payload = ensureForecastHistory();
+    const format = req.query.format || 'json';
+
+    if (format === 'csv') {
+      res.setHeader('Content-Type', 'text/csv');
+      res.setHeader('Content-Disposition', 'attachment; filename="forecasts.csv"');
+      res.send(forecastsToCsv(payload.forecasts));
+      return;
+    }
+
+    res.json(payload);
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
