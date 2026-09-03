@@ -91,13 +91,15 @@ export class InvestmentsView {
     if (!this.root) return;
     this.root.innerHTML = `
       ${this.privacyBanner()}
-      <section class="inv-empty" id="inv-empty-state">
+      <section class="inv-import">
         <h2>Investments</h2>
-        <p>No imported holdings yet. Import history first — never overwrite REAL positions from a screenshot.</p>
         <label class="inv-file-label">
           Import Activity CSV
           <input type="file" id="inv-file-input" accept=".csv,text/csv,text/plain" />
         </label>
+      </section>
+      <section class="inv-empty" id="inv-empty-state">
+        <p>No imported holdings yet. Import history first — never overwrite REAL positions from a screenshot.</p>
       </section>
       <div id="inv-preview" class="hidden"></div>
       <div id="inv-workspace"></div>
@@ -194,7 +196,7 @@ export class InvestmentsView {
         <h4>Paper BUY / SELL</h4>
         <form id="inv-paper-form" class="inv-form">
           <label>Symbol <input name="symbol" required /></label>
-          <label>Date <input name="date" type="date" required /></label>
+          <label>Date <input name="date" type="text" placeholder="YYYY-MM-DD" required /></label>
           <label>Side
             <select name="side"><option value="BUY">BUY</option><option value="SELL">SELL</option></select>
           </label>
@@ -221,7 +223,7 @@ export class InvestmentsView {
         <h4>Start / stop tracking</h4>
         <form id="inv-track-form" class="inv-form">
           <label>Symbol <input name="symbol" required /></label>
-          <label>Start date <input name="startDate" type="date" required /></label>
+          <label>Start date <input name="startDate" type="text" placeholder="YYYY-MM-DD" required /></label>
           <label>Baseline price <input name="baselinePrice" type="number" step="any" required /></label>
           <button type="submit">Start tracking</button>
         </form>

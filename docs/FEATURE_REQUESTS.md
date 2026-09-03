@@ -399,6 +399,15 @@ npm start
 - REAL and TRACKING sections render separately
 - Existing chart/universe features stay intact
 
+**Localhost UI (2026-09-03, synthetic CSV only — not Kevin's E*TRADE file):**
+- Investments tab: privacy warning + empty state + file input
+- Preview listed missing-price / missing-qty / needs-mapping; Commit required
+- After commit: REAL P&L (realized $559, unrealized **missing**, basis $360, dividends $25); flagged rows marked no-fill
+- Paper BUY BTC 2024-07-01 qty 2 @ 140 stayed TRACKING; not mixed into REAL
+- Start ETH 2024-01-01 @ 2000 then Stop: row remains, status stopped, history kept, still TRACKING
+- Overview tab controls still render (this host had no Flow pack, so BTC 1d chart was empty — not an Investments regression)
+- Chart transaction markers: unit-tested; not visually confirmed on live candles (no pack)
+
 **Priority:** High
 
 ---

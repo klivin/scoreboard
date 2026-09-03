@@ -683,7 +683,9 @@ scoreboard.investments
 - FIFO + average-cost lots; paper BUY/SELL; start/stop tracking preserves history
 - Transaction markers on asset charts; local CSV/JSON export
 - Tests: synthetic CSV only. Real brokerage files are not in-repo and were not imported
-- Status: **doing** until localhost UI + `npm test` are verified
+- Localhost UI (synthetic CSV): empty state + privacy warning, preview/Commit, REAL vs TRACKING, paper BUY, start/stop keeps history
+- Chart markers unit-tested; live candle overlay not visually confirmed on this host (no Flow pack)
+- Status: **doing** — first-slice UI/tests passed; screenshot import and broker sync stay open
 
 ### Signal engine + backtest (research, first slice)
 - Extensible strategies: EMA golden/death (true EMA50), MACD from close, RSI recovery, Ichimoku pack fields
