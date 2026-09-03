@@ -6,6 +6,7 @@ import {
   paneStretchFactor
 } from './chart-panes.js';
 import { buildTooltipLines, formatPrice as formatPriceLabel } from './chart-tooltip.js';
+import { buildSignalTooltipHtml } from './signal-panel.js';
 
 const DEFAULT_VIEWPORT_DAYS = 5;
 
@@ -31,6 +32,9 @@ export class ChartView {
     this.trendSeries = [];
     this.rowByTime = new Map();
     this.lastHoverRow = null;
+    this.signalEvents = [];
+    this.signalEventByTime = new Map();
+    this.activeSignalEvent = null;
     this.options = {
       showMA20: true,
       showMA50: true,
@@ -68,6 +72,15 @@ export class ChartView {
 
   setPredictedSeries(series) {
     this.predictedSeries = series;
+  }
+
+  setSignalEvents(events) {
+    this.signalEvents = events || [];
+    this.signalEventByTime = new Map();
+    for (const event of this.signalEvents) {
+      if (!event || !event.timestamp) continue;
+      this.signalEventByTime.set(Math.floor(event.timestamp / 1000), event);
+    }
   }
 
   setInterval(interval) {
@@ -404,24 +417,43 @@ export class ChartView {
   applyLastPriceMarker() {
     const L = this.lwc();
     const last = lastKnownRow(this.data);
-    if (!last || !this.candleSeries) return;
+    const markers = [];
 
-    const marker = {
-      time: Math.floor(last.timestamp / 1000),
-      position: 'inBar',
-      color: '#667eea',
-      shape: 'circle',
-      text: this.formatPrice(last.close)
-    };
+    for (const event of this.signalEvents) {
+      const c = event.consensus;
+      if (!c || c.direction === 'NEUTRAL') continue;
+      const time = Math.floor(event.timestamp / 1000);
+      const isBuy = c.direction === 'BUY';
+      const isClose = c.direction === 'CLOSE';
+      markers.push({
+        time,
+        position: isBuy ? 'belowBar' : 'aboveBar',
+        color: isClose ? '#64748b' : (isBuy ? '#10b981' : '#ef4444'),
+        shape: isClose ? 'circle' : (isBuy ? 'arrowUp' : 'arrowDown'),
+        text: `${c.direction} ${c.scorePercent}`
+      });
+    }
+
+    if (last) {
+      markers.push({
+        time: Math.floor(last.timestamp / 1000),
+        position: 'inBar',
+        color: '#667eea',
+        shape: 'circle',
+        text: this.formatPrice(last.close)
+      });
+    }
+
+    if (!markers.length || !this.candleSeries) return;
 
     try {
       if (typeof L.createSeriesMarkers === 'function') {
-        this.markersApi = L.createSeriesMarkers(this.candleSeries, [marker]);
+        this.markersApi = L.createSeriesMarkers(this.candleSeries, markers);
       } else if (this.candleSeries.setMarkers) {
-        this.candleSeries.setMarkers([marker]);
+        this.candleSeries.setMarkers(markers);
       }
     } catch (error) {
-      console.warn('last-price marker skipped', error);
+      console.warn('markers skipped', error);
     }
   }
 
@@ -497,6 +529,14 @@ export class ChartView {
     const row = this.rowFromParam(param) || this.lastHoverRow;
     if (row) this.updateDayStrip(row);
 
+    const signalEvent = param && param.time != null
+      ? this.signalEventByTime.get(timeKey(param.time))
+      : null;
+    if (signalEvent) {
+      this.activeSignalEvent = signalEvent;
+      this.showSignalDetail(signalEvent);
+    }
+
     if (this.drawMode === 'none' || !param || !param.point || !this.candleSeries) return;
     const L = this.lwc();
     const price = this.candleSeries.coordinateToPrice(param.point.y);
@@ -547,6 +587,15 @@ export class ChartView {
       this.tooltip.classList.add('hidden');
       return;
     }
+
+    const signalEvent = this.signalEventByTime.get(timeKey(param.time));
+    if (signalEvent) {
+      this.tooltip.innerHTML = buildSignalTooltipHtml(signalEvent);
+      this.tooltip.classList.remove('hidden');
+      this.positionTooltip(param);
+      return;
+    }
+
     const row = this.rowFromParam(param);
     this.lastHoverRow = row;
     if (!row) {
@@ -557,7 +606,10 @@ export class ChartView {
     const lines = buildTooltipLines(row, this.options, this.interval);
     this.tooltip.innerHTML = lines.map((line) => `<div>${line}</div>`).join('');
     this.tooltip.classList.remove('hidden');
+    this.positionTooltip(param);
+  }
 
+  positionTooltip(param) {
     const wrap = this.container.parentElement || this.container;
     const rect = wrap.getBoundingClientRect();
     const x = param.point.x;
@@ -570,6 +622,13 @@ export class ChartView {
     if (top + tipH > rect.height - 8) top = y - tipH - 16;
     this.tooltip.style.left = `${Math.max(8, left)}px`;
     this.tooltip.style.top = `${Math.max(8, top)}px`;
+  }
+
+  showSignalDetail(event) {
+    const strip = document.getElementById('signal-detail-strip');
+    if (!strip) return;
+    strip.innerHTML = buildSignalTooltipHtml(event);
+    strip.classList.remove('hidden');
   }
 
   resize() {

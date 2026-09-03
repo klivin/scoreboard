@@ -1,4 +1,5 @@
 import { optionKeyFromToggleId, TOGGLE_OPTION_MAP } from './toggles.js';
+import { getEnabledSignalStrategies, getSignalHorizon } from './signal-panel.js';
 
 export class AppController {
   constructor(views) {
@@ -133,6 +134,23 @@ export class AppController {
     return (select && select.value) || this.currentInterval || '1d';
   }
 
+  async loadTradingSignals(symbol, interval) {
+    const enabled = getEnabledSignalStrategies();
+    const horizon = getSignalHorizon();
+    const params = new URLSearchParams({
+      symbol,
+      interval,
+      horizon,
+      strategies: enabled.join(',')
+    });
+    const response = await fetch(`/api/trading-signals?${params}`);
+    if (!response.ok) {
+      console.warn('Trading signals unavailable');
+      return { events: [] };
+    }
+    return response.json();
+  }
+
   async updateOverview(symbol, interval = '1d') {
     this.currentSymbol = symbol;
     this.currentInterval = interval;
@@ -155,6 +173,17 @@ export class AppController {
     }
 
     this.syncChartOptionsFromCheckboxes();
+    try {
+      const signalData = await this.loadTradingSignals(symbol, interval);
+      if (this.views.chart.setSignalEvents) {
+        this.views.chart.setSignalEvents(signalData.events || []);
+      }
+    } catch (error) {
+      console.warn('Could not load trading signals:', error);
+      if (this.views.chart.setSignalEvents) {
+        this.views.chart.setSignalEvents([]);
+      }
+    }
     this.views.chart.render();
     this.views.stats.render(data);
 
@@ -281,6 +310,15 @@ export class AppController {
     const fitAll = document.getElementById('fit-all-btn');
     if (fitAll) {
       fitAll.addEventListener('click', () => this.views.chart.fitAll());
+    }
+
+    document.querySelectorAll('[id^="toggle-signal-"]').forEach((checkbox) => {
+      checkbox.addEventListener('change', () => this.reloadSelected());
+    });
+
+    const signalHorizon = document.getElementById('signal-horizon-select');
+    if (signalHorizon) {
+      signalHorizon.addEventListener('change', () => this.reloadSelected());
     }
 
     document.querySelectorAll('.tab-btn').forEach((btn) => {

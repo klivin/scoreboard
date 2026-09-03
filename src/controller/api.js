@@ -1,6 +1,14 @@
 import { seriesModel } from '../model/series.js';
 import { generateForecast, createForecastCard, generatePredictedSeries } from '../model/forecast.js';
 import { forecastStore } from '../model/store-adapter.js';
+import {
+  evaluateWalkForward,
+  evaluateAll,
+  ALL_STRATEGIES,
+  DEFAULT_ENABLED,
+  HORIZONS
+} from '../model/signals/index.js';
+import { runFullBacktest, loadBacktestSeries, formatBacktestReport } from '../model/backtest.js';
 
 export function handleGetSeries(req, res) {
   const { symbol = 'BTC', interval = '1d', from, to, fields } = req.query;
@@ -169,6 +177,83 @@ export function handleGetPredictedSeries(req, res) {
       interval,
       ...series
     });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+}
+
+function parseEnabledStrategies(query) {
+  if (!query.strategies) return DEFAULT_ENABLED;
+  return String(query.strategies).split(',').map((s) => s.trim()).filter(Boolean);
+}
+
+export function handleGetTradingSignals(req, res) {
+  const {
+    symbol = 'BTC',
+    interval = '1d',
+    horizon = 'weekly',
+    walkForward = 'true'
+  } = req.query;
+
+  try {
+    seriesModel.load();
+    const data = seriesModel.getIndicators(symbol, interval);
+    if (!data.length) {
+      res.status(404).json({ error: 'No data available for symbol' });
+      return;
+    }
+
+    const enabled = parseEnabledStrategies(req.query);
+    const options = { horizon: HORIZONS.includes(horizon) ? horizon : 'weekly' };
+    const events = walkForward === 'false'
+      ? evaluateAll(data, enabled, options)
+      : evaluateWalkForward(data, enabled, options);
+
+    res.json({
+      symbol,
+      interval,
+      horizon: options.horizon,
+      enabled,
+      available: ALL_STRATEGIES.map((s) => ({ id: s.id, name: s.name })),
+      count: events.length,
+      events,
+      disclaimer: 'Research signage only. Not a trade recommendation.'
+    });
+  } catch (error) {
+    res.status(error.message && error.message.startsWith('No ') ? 404 : 500)
+      .json({ error: error.message });
+  }
+}
+
+export function handleGetBacktest(req, res) {
+  const {
+    symbol = 'BTC',
+    horizon = 'weekly',
+    format = 'json'
+  } = req.query;
+
+  try {
+    const { series, dataSource } = loadBacktestSeries(symbol);
+    const enabled = parseEnabledStrategies(req.query);
+    const result = runFullBacktest(series, {
+      symbol,
+      horizon: HORIZONS.includes(horizon) ? horizon : 'weekly',
+      enabled,
+      dataSource
+    });
+
+    if (result.error) {
+      res.status(400).json({ error: result.error });
+      return;
+    }
+
+    if (format === 'markdown') {
+      res.setHeader('Content-Type', 'text/markdown');
+      res.send(formatBacktestReport(result));
+      return;
+    }
+
+    res.json(result);
   } catch (error) {
     res.status(500).json({ error: error.message });
   }

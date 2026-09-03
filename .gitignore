@@ -7,3 +7,5 @@ data/*.json
 !data/README.md
 store/*.json
 !store/.gitkeep
+store/*.csv
+store/backtest_*

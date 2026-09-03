@@ -66,6 +66,20 @@
           <label><input type="checkbox" id="toggle-actual"> Actual</label>
           <label><input type="checkbox" id="toggle-naive" checked> Naive Baseline</label>
         </div>
+        <div class="signal-controls">
+          <span class="signal-controls-title">Signal engine <em>(research only)</em>:</span>
+          <label>
+            Horizon:
+            <select id="signal-horizon-select">
+              <option value="weekly" selected>Weekly</option>
+              <option value="monthly">Monthly</option>
+            </select>
+          </label>
+          <label><input type="checkbox" id="toggle-signal-ema-crossover" checked> EMA cross</label>
+          <label><input type="checkbox" id="toggle-signal-macd-cross" checked> MACD</label>
+          <label><input type="checkbox" id="toggle-signal-rsi-recovery" checked> RSI recovery</label>
+          <label><input type="checkbox" id="toggle-signal-ichimoku" checked> Ichimoku</label>
+        </div>
         <div class="chart-toolbar">
           <button type="button" class="tool-btn active" data-draw-mode="cursor">Cursor</button>
           <button type="button" class="tool-btn" data-draw-mode="horizontal">Horizontal</button>
@@ -80,6 +94,7 @@
           <div id="chart-empty" class="chart-empty hidden"></div>
         </div>
         <div id="chart-day-strip" class="chart-day-strip hidden"></div>
+        <div id="signal-detail-strip" class="signal-detail-strip hidden"></div>
       </div>
 
       <div id="signals-container">
