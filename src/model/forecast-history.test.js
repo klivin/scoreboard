@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert';
 import { LocalStore } from './store.js';
-import { generateHistoryForSeriesMap, persistForecastRecords, listForecastRecords, rescoreRecords } from './forecast-history.js';
+import { generateHistoryForSeriesMap, persistForecastRecords, listForecastRecords, rescoreRecords, ensureForecastHistory } from './forecast-history.js';
 import { mapFixtureRows } from './forecast-history.js';
 import { buildBacktestFixture } from './fixtures/backtest-pack.js';
 import fs from 'fs';
@@ -56,6 +56,60 @@ test('schema-versioned store persist + rescore does not invent 0 MAE for too-ear
       assert.notStrictEqual(row.score.mae, 0);
     }
   }
+
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test('does not rescore fixture records against a live series missing those as-of days', () => {
+  const fixtureMap = mapFixtureRows(buildBacktestFixture({ days: 60, seed: 3 }));
+  const fixtureRows = generateHistoryForSeriesMap({ BTC: fixtureMap.BTC }, {
+    dataSource: 'fixture',
+    horizons: ['weekly']
+  });
+  const matured = fixtureRows.find((row) => row.status === 'matured');
+  assert.ok(matured);
+  const liveSeries = [
+    { timestamp: Date.parse('2026-09-01T00:00:00Z'), date_utc: '2026-09-01', close: 80000 },
+    { timestamp: Date.parse('2026-09-02T00:00:00Z'), date_utc: '2026-09-02', close: 80100 }
+  ];
+  const rescored = rescoreRecords([matured], { BTC: liveSeries }, { dataSource: 'series' });
+  assert.strictEqual(rescored[0].status, 'matured');
+  assert.strictEqual(rescored[0].score.mae, matured.score.mae);
+  assert.notStrictEqual(rescored[0].status, 'missing-actual');
+});
+
+test('ensureForecastHistory replaces fixture seed with live walk-forward for that symbol', () => {
+  const { store, dir } = tempStore();
+  const fixtureMap = mapFixtureRows(buildBacktestFixture({ days: 60, seed: 3 }));
+  const fixtureRows = generateHistoryForSeriesMap({ BTC: fixtureMap.BTC }, {
+    dataSource: 'fixture',
+    horizons: ['weekly']
+  });
+  persistForecastRecords(fixtureRows, store);
+
+  const live = [];
+  const start = Date.parse('2026-01-01T00:00:00Z');
+  for (let i = 0; i < 50; i += 1) {
+    live.push({
+      timestamp: start + i * 86400000,
+      date_utc: new Date(start + i * 86400000).toISOString().slice(0, 10),
+      open: 70000 + i * 10,
+      high: 70100 + i * 10,
+      low: 69900 + i * 10,
+      close: 70000 + i * 10,
+      ma20: 69900 + i * 10
+    });
+  }
+
+  const payload = ensureForecastHistory({
+    store,
+    seriesBundle: { map: { BTC: live }, dataSource: 'series' },
+    horizons: ['weekly']
+  });
+  assert.ok(payload.forecasts.length > 0);
+  assert.ok(payload.forecasts.every((row) => row.dataSource === 'series'));
+  assert.ok(payload.forecasts.every((row) => row.asOfDateUtc && row.asOfDateUtc.startsWith('2026')));
+  assert.strictEqual(payload.note, null);
 
   fs.rmSync(dir, { recursive: true, force: true });
 });

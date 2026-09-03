@@ -299,6 +299,10 @@ export class AppController {
   async openForecastOnOverview(payload) {
     if (!payload) return;
     this.switchTab('overview');
+    if (this.views.chart.showForecastRationale) {
+      this.views.chart.showForecastRationale(payload);
+    }
+
     const symbol = payload.symbol || this.getSelectedSymbol();
     const select = document.getElementById('symbol-select');
     if (select && symbol) select.value = symbol;
@@ -306,6 +310,9 @@ export class AppController {
     try {
       if (!this.views.chart.data || this.currentSymbol !== symbol) {
         await this.updateOverview(symbol, this.getSelectedInterval());
+        if (this.views.chart.showForecastRationale) {
+          this.views.chart.showForecastRationale(payload);
+        }
       }
     } catch (error) {
       this.showPageError(error.message || `No Overview series for ${symbol}`);

@@ -804,6 +804,16 @@ button:hover {
   margin-top: 12px;
 }
 
+.fc-fixture {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  font-size: 0.7rem;
+  background: #fef3c7;
+  color: #92400e;
+}
+
 @media (max-width: 768px) {
   .container {
     padding: 20px;

@@ -4,7 +4,10 @@ import { buildBacktestFixture } from './fixtures/backtest-pack.js';
 import { seriesModel } from './series.js';
 import { forecastStore } from './store-adapter.js';
 import { migrateForecastStore, FORECAST_SCHEMA_VERSION, FORECAST_NAMESPACE } from './forecast-schema.js';
-import { generateWalkForwardForecasts, rescoreForecastRecord, buildScoredForecast } from './forecast-score.js';
+import { findBarOnUtcDay, generateWalkForwardForecasts, rescoreForecastRecord, buildScoredForecast } from './forecast-score.js';
+
+export const FIXTURE_NOTE = 'Forecasts were generated from the deterministic backtest fixture (not live Flow pack). Outcomes are fixture closes, not invented zeros, and are not live market claims.';
+export const MIXED_NOTE = 'Some rows are labeled fixture (deterministic backtest fixture, not live Flow pack). Other rows are scored on available series closes. Outcomes are not invented zeros.';
 
 function stampCache(store, migrated) {
   if (!store) return migrated;
@@ -49,6 +52,33 @@ export function persistForecastRecords(records, store = forecastStore) {
     if (typeof store._save === 'function') store._save();
   }
   return listForecastRecords(store);
+}
+
+export function replaceForecastRecords(records, store = forecastStore) {
+  loadMigratedForecastStore(store);
+  if (store && store.cache) {
+    store.cache.items = [];
+    store.cache.schemaVersion = FORECAST_SCHEMA_VERSION;
+    store.cache.namespace = FORECAST_NAMESPACE;
+  }
+  return persistForecastRecords(records, store);
+}
+
+function historyNote(records, loaded) {
+  const list = records || [];
+  const fixtureCount = list.filter((row) => row.dataSource === 'fixture').length;
+  if (!list.length) return null;
+  if (fixtureCount === list.length || loaded.dataSource === 'fixture') return FIXTURE_NOTE;
+  if (fixtureCount > 0) return MIXED_NOTE;
+  return null;
+}
+
+function historyDataSource(records, loaded) {
+  const list = records || [];
+  if (!list.length) return loaded.dataSource;
+  const sources = new Set(list.map((row) => row.dataSource || loaded.dataSource));
+  if (sources.size === 1) return [...sources][0];
+  return 'mixed';
 }
 
 export function mapFixtureRows(rows) {
@@ -96,12 +126,14 @@ export function loadSeriesBySymbol() {
   };
 }
 
-export function rescoreRecords(records, seriesBySymbol) {
+export function rescoreRecords(records, seriesBySymbol, { dataSource = null } = {}) {
   return (records || []).map((record) => {
     const series = seriesBySymbol && record.symbol
       ? seriesBySymbol[String(record.symbol).toUpperCase()]
       : null;
     if (!series || !series.length) return record;
+    if (record.dataSource === 'fixture' && dataSource === 'series') return record;
+    if (!findBarOnUtcDay(series, record.asOfTimestamp)) return record;
     return rescoreForecastRecord(record, series);
   });
 }
@@ -126,13 +158,30 @@ export function ensureForecastHistory(options = {}) {
   let records;
   let seeded = false;
 
+  const horizons = options.horizons || ['weekly', 'monthly'];
+
   if (existing.length) {
-    records = rescoreRecords(existing, loaded.map);
-    persistForecastRecords(records, store);
+    let keep = existing;
+    if (loaded.dataSource === 'series') {
+      const liveSymbols = new Set(Object.keys(loaded.map || {}));
+      keep = existing.filter((row) => !(row.dataSource === 'fixture' && liveSymbols.has(String(row.symbol || '').toUpperCase())));
+      const have = new Set(keep.map((row) => String(row.symbol || '').toUpperCase()));
+      const missing = {};
+      for (const [symbol, series] of Object.entries(loaded.map || {})) {
+        if (!have.has(symbol)) missing[symbol] = series;
+      }
+      const generated = generateHistoryForSeriesMap(missing, { dataSource: 'series', horizons });
+      keep = rescoreRecords(keep, loaded.map, { dataSource: loaded.dataSource }).concat(generated);
+      if (generated.length) seeded = true;
+    } else {
+      keep = rescoreRecords(existing, loaded.map, { dataSource: loaded.dataSource });
+    }
+    records = keep;
+    replaceForecastRecords(records, store);
   } else {
     records = generateHistoryForSeriesMap(loaded.map, {
       dataSource: loaded.dataSource,
-      horizons: options.horizons || ['weekly', 'monthly']
+      horizons
     });
     seeded = records.length > 0;
     if (records.length) persistForecastRecords(records, store);
@@ -146,10 +195,8 @@ export function ensureForecastHistory(options = {}) {
     forecasts: records,
     count: records.length,
     seeded,
-    dataSource: loaded.dataSource,
-    note: loaded.dataSource === 'fixture'
-      ? 'Forecasts were generated from the deterministic backtest fixture (not live Flow pack). Outcomes are fixture closes, not invented zeros, and are not live market claims.'
-      : null
+    dataSource: historyDataSource(records, loaded),
+    note: historyNote(records, loaded)
   };
 }
 

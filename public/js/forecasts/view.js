@@ -133,7 +133,7 @@ export class ForecastsView {
       ? `${score.direction || 'n/a'} vs naive ${score.naiveDirection || 'n/a'}`
       : 'n/a';
     return `<tr class="fc-row${selected}" data-forecast-id="${escapeHtml(row.id || '')}">
-      <td>${escapeHtml(row.symbol || 'n/a')}</td>
+      <td>${escapeHtml(row.symbol || 'n/a')}${row.dataSource === 'fixture' ? ' <span class="fc-fixture">fixture</span>' : ''}</td>
       <td>${escapeHtml(row.horizon || 'n/a')}</td>
       <td>${escapeHtml(row.asOfDateUtc || 'n/a')}</td>
       <td>${formatMoney(pred.point)}</td>
