@@ -7,6 +7,8 @@ import {
   handleGetForecast,
   handleGetMissing,
   handleGetUniverse,
+  handleGetScanner,
+  handleGetScannerEvaluate,
   handleGetForecasts,
   handleGetSignals,
   handleGetPredictedSeries,
@@ -35,6 +37,8 @@ app.get('/api/indicators', handleGetIndicators);
 app.get('/api/forecast', handleGetForecast);
 app.get('/api/missing', handleGetMissing);
 app.get('/api/universe', handleGetUniverse);
+app.get('/api/scanner', handleGetScanner);
+app.get('/api/scanner/evaluate', handleGetScannerEvaluate);
 app.get('/api/forecasts', handleGetForecasts);
 app.get('/api/signals', handleGetSignals);
 app.get('/api/predicted-series', handleGetPredictedSeries);

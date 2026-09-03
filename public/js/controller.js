@@ -327,8 +327,12 @@ export class AppController {
   }
 
   async updateUniverse() {
+    if (this.scanner) {
+      await this.scanner.refresh();
+      return;
+    }
     const universe = await this.loadUniverse();
-    this.views.universe.render(universe);
+    if (this.views.universe) this.views.universe.render(universe);
   }
 
   async handleGenerateForecast(symbol, horizon) {

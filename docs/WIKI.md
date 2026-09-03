@@ -39,12 +39,12 @@ Scoreboard is a crypto market analysis and forecasting dashboard built with vani
 - `markers.js` / `export.js` - chart marker payloads + local CSV/JSON export
 - `view.js` / `controller.js` - Investments tab UI (FileReader; no upload)
 
-**View** (`public/js/view.js`, `public/js/chart-view.js`)
+**View** (`public/js/view.js`, `public/js/chart-view.js`, `public/js/scanner/`)
 - `ChartView` - Lightweight Charts price chart (pan/zoom, overlays, drawings)
 - `StatsView` - Statistics cards
 - `SignalsView` - Market signals (ETF flows, OI, ratios)
 - `ForecastView` - Forecast cards with steelman analysis
-- `UniverseView` - Crypto universe display
+- `UniverseView` / scanner - Universe tab money-scanner (research board)
 
 **Controller** (`public/js/controller.js`)
 - `AppController` - Coordinates data loading and view updates
@@ -398,6 +398,74 @@ GET /api/backtest?symbol=BTC&horizon=weekly&format=json|markdown
 
 ---
 
+## Universe money-scanner (research board)
+
+**Status:** doing. The Universe tab is a **research / paper scanner**, not a trade blotter and not a ranked sentiment feed.
+
+**Not a trade bot.** The banner on the tab is required: research only, no automatic recommendations, no execution, no keys. Paper tracking is TRACKING, never REAL.
+
+### What a row is
+
+Each row is a **supported** asset (Flow-pack crypto first; CoinGecko names if present; REAL/TRACKING symbols the user already has). Stocks and other classes appear only when we actually have them — the pack does not include equities, so stock cells stay missing / the stock filter is empty. Do not invent tickers.
+
+| Column | Source | Missing behavior |
+|---|---|---|
+| Current price | Last finite close on the 1d series | `missing` (never `$0`) |
+| Liquidity / freshness | Last finite volume + age of last bar | volume or age `missing` if unknown |
+| 1d / 7d / 30d direction + confidence | Trend model (`generateForecast`) vs last close; confidence from the model’s own band width | both `missing` if no last price / forecast |
+| Flip timestamp | Last bullish↔bearish change of **model direction** or **signal consensus** | `missing` if no prior state |
+| Signal consensus | Existing signal engine (`evaluateWalkForward` / last event) | `missing` if no votes — **not** a fake 50 / NEUTRAL |
+| Backtest status | Stored `store/backtest_{SYMBOL}_{horizon}.json` if present | `missing` — scanner does **not** invent a backtest or run one live |
+| ETF / OI / corr | Pack ETF millions, OKX OI contracts, `corr_30d_vs_btc.csv` | `missing` when the series is absent (alts have no OI; most have no ETF) |
+
+Direction is the **model’s sided prediction** (prediction ≷ last close → BULLISH / BEARISH / NEUTRAL). That is not a sentiment poll and not a ranking. Confidence is derived from forecast band width relative to price; if bands are absent, confidence is missing. There is **no** composite scanner score.
+
+### Filters and sort
+
+- **New bullish / bearish flip:** last recorded flip is to that family and its timestamp is within 7 days of scan time. Older flips stay in history but are not “new”.
+- **Confidence / horizon:** filter and sort use the selected horizon’s model confidence (1d / 7d / 30d). Missing confidence sorts last, never as `0`.
+- **Asset class:** `crypto` for pack / CoinGecko coins; `stock` only if explicitly classified (none in pack); otherwise `unknown`.
+- **REAL holdings / TRACKING:** from Investments `scoreboard.investments` (REAL import events / open lots; TRACKING watch records). Badges are never mixed.
+
+### Tracking (baseline freeze)
+
+Add to Tracking / Remove Tracking calls Investments `addTracking` / `stopTracking` when `scoreboard.investments` exists. Fallback: `scoreboard.scanner.tracking` (`schemaVersion: 1`, namespace `scanner`).
+
+Start **requires** a finite baseline price. Missing price cannot start tracking (no inferred `$0` fill). Start freezes `{ symbol, startDate, baselinePrice, startedAt }`. Evaluation uses **only data at or after that baseline**:
+
+- Actual forward P&amp;L vs frozen baseline (or stop price if stopped)
+- Model forecast made **at the baseline bar** (no lookahead) vs actual at 1d / 7d / 30d
+- Naive last-price forecast from the same baseline vs the same actuals
+
+Stop sets status `stopped` and **keeps** the row + history. History is never deleted.
+
+### Flip history
+
+A flip is a change of bullish/bearish **family** (BULLISH/LONG/BUY ↔ BEARISH/SHORT/SELL). NEUTRAL ↔ sided is recorded as a state change. Same-family updates are not flips. Each event stores `{ at, source, prior, next }`. The Flip history panel shows the selected symbol’s events. Persist computed flips in `store/scanner_flips` (server) so a later scan can compare against the last known state.
+
+### API
+
+```
+GET /api/scanner
+GET /api/scanner/evaluate?symbol=&startedAt=&baselinePrice=
+GET /api/universe          # still the raw CoinGecko freeze (unchanged)
+```
+
+`GET /api/scanner` returns `{ disclaimer, generatedAt, note, rows[] }`. Holdings badges are applied in the browser from the Investments store (the server does not see brokerage CSV).
+
+### Files
+
+```
+src/model/scanner.js              # row / flip / filter / evaluation (pure)
+src/model/scanner-build.js        # assemble rows from series + signals + forecasts
+src/controller/api.js             # GET /api/scanner
+public/js/scanner/                # Universe tab view + controller
+```
+
+Clicking a scanner row sets `#symbol-select` and opens Overview (same `updateOverview` path as the dropdown).
+
+---
+
 ## Forecasting
 
 ### Naive Baseline
@@ -594,6 +662,8 @@ GET /api/signals?symbol=BTC
 GET /api/trading-signals?symbol=BTC&interval=1d&horizon=weekly
 GET /api/backtest?symbol=BTC&horizon=weekly
 GET /api/universe
+GET /api/scanner
+GET /api/scanner/evaluate
 GET /api/missing
 ```
 
@@ -655,6 +725,7 @@ npm test
 - Consensus aggregation
 - Backtest metrics (drawdown, CAGR, simulateTrades)
 - Edge cases (empty data, nulls, single points)
+- Scanner rows (missing stays missing), flip history, tracking baseline, filters/sorts
 
 Run backtest report: `npm run backtest`
 
@@ -847,6 +918,13 @@ scoreboard.investments
 - Weekly / monthly horizon filters; JSON/CSV export of the filtered list
 - Schema-versioned server `store/forecasts.json` + client `scoreboard.forecasts` with migrations
 - Reuses `src/model/forecast.js`. Fixture seed when Flow pack is absent (labeled, not live)
+
+### Universe money-scanner (research board)
+- Universe tab is a scanner table (price, freshness, 1d/7d/30d model direction + confidence, flips, consensus, backtest status, ETF/OI/corr)
+- Research-only banner; missing cells say missing; no fabricated ranking/sentiment
+- Filters/sorts: new flip, confidence, horizon, asset class, REAL, TRACKING
+- Tracking uses Investments `scoreboard.investments` (fallback local scanner namespace); baseline freeze + evaluation vs naive
+- Flip history recorded on consensus/direction change
 - Status: **doing**
 
 ### Investments tab (first slice, local-only)
@@ -919,5 +997,5 @@ scoreboard.investments
 ---
 
 **Last Updated:** 2026-09-03  
-**Version:** v1.5 (Investments tab + local-only import)  
+**Version:** v1.6 (Universe money-scanner)  
 **Status:** Not Pooli. No keys client-side. No trades. Import stays in-browser.

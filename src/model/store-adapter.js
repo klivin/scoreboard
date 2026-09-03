@@ -152,3 +152,4 @@ export const errorLogStore = storeAdapter.getStore('error_logs');
 export const universeStore = storeAdapter.getStore('universe');
 export const ingestWatermarkStore = storeAdapter.getStore('ingest_watermarks');
 export const ingestSeriesStore = storeAdapter.getStore('ingest_series');
+export const scannerFlipsStore = storeAdapter.getStore('scanner_flips');
