@@ -49,3 +49,5 @@ Chart overlays (real pack columns only; gaps stay gaps):
 - Volume: `volume` / `volume_base` on a **separate pane**. Never put `volume_quote` / `volCcy` on the price scale.
 - ETF: `etf_btc_daily_net_flows.csv` / `etf_eth_daily_net_flows.csv` field `net_flow_usd_millions`.
 - Open Interest: `okx_btc_usdt_swap_oi_1d.csv` / `okx_btc_usdt_swap_oi_1h.csv` field `oi` or `oi_ccy` (not `oi_usd` on price). Short interest is not in the pack.
+
+**Do not place brokerage Activity CSVs here.** Investments import is browser-local only (`<input type=file>` + FileReader). Real E*TRADE activity files must not be committed, uploaded, or used as fixtures.

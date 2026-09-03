@@ -1,4 +1,5 @@
 import { optionKeyFromToggleId, TOGGLE_OPTION_MAP } from './toggles.js';
+import { buildTransactionMarkers } from './investments/markers.js';
 import { getEnabledSignalStrategies, getSignalHorizon } from './signal-panel.js';
 
 export class AppController {
@@ -7,6 +8,7 @@ export class AppController {
     this.currentSymbol = 'BTC';
     this.currentInterval = '1d';
     this.currentHorizon = 7;
+    this.investments = null;
   }
 
   showPageError(message) {
@@ -190,6 +192,20 @@ export class AppController {
     if (this.views.signals) {
       await this.updateSignals(symbol);
     }
+
+    this.syncInvestmentMarkers();
+  }
+
+  syncInvestmentMarkers() {
+    if (!this.views.chart || !this.views.chart.setInvestmentEvents) return;
+    const events = this.investments && this.investments.store
+      ? this.investments.store.allFillEvents()
+      : [];
+    const markers = buildTransactionMarkers(events, this.currentSymbol);
+    this.views.chart.setInvestmentEvents(markers);
+    if (this.views.chart.candleSeries && this.views.chart.applyLastPriceMarker) {
+      this.views.chart.applyLastPriceMarker();
+    }
   }
 
   async loadPredictedSeries(symbol, interval, horizon) {
@@ -335,6 +351,8 @@ export class AppController {
           await this.updateForecasts();
         } else if (tab === 'universe') {
           await this.updateUniverse();
+        } else if (tab === 'investments' && this.investments) {
+          this.investments.refresh();
         }
       });
     });

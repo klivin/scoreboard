@@ -7,6 +7,8 @@ import {
 } from './chart-panes.js';
 import { buildTooltipLines, formatPrice as formatPriceLabel } from './chart-tooltip.js';
 import { buildSignalTooltipHtml } from './signal-panel.js';
+import { toChartMarker, formatMarkerDetail } from './investments/markers.js';
+import { renderInvestmentDetail } from './investments/view.js';
 
 const DEFAULT_VIEWPORT_DAYS = 5;
 
@@ -35,6 +37,8 @@ export class ChartView {
     this.signalEvents = [];
     this.signalEventByTime = new Map();
     this.activeSignalEvent = null;
+    this.investmentEvents = [];
+    this.investmentEventsByTime = new Map();
     this.options = {
       showMA20: true,
       showMA50: true,
@@ -80,6 +84,18 @@ export class ChartView {
     for (const event of this.signalEvents) {
       if (!event || !event.timestamp) continue;
       this.signalEventByTime.set(Math.floor(event.timestamp / 1000), event);
+    }
+  }
+
+  setInvestmentEvents(events) {
+    this.investmentEvents = events || [];
+    this.investmentEventsByTime = new Map();
+    for (const event of this.investmentEvents) {
+      if (!event || event.time == null) continue;
+      const key = event.time;
+      const list = this.investmentEventsByTime.get(key) || [];
+      list.push(event);
+      this.investmentEventsByTime.set(key, list);
     }
   }
 
@@ -434,6 +450,11 @@ export class ChartView {
       });
     }
 
+    for (const event of this.investmentEvents) {
+      if (!event || event.time == null) continue;
+      markers.push(toChartMarker(event));
+    }
+
     if (last) {
       markers.push({
         time: Math.floor(last.timestamp / 1000),
@@ -537,6 +558,13 @@ export class ChartView {
       this.showSignalDetail(signalEvent);
     }
 
+    const invEvents = param && param.time != null
+      ? this.investmentEventsByTime.get(timeKey(param.time))
+      : null;
+    if (invEvents && invEvents.length) {
+      this.showInvestmentDetail(invEvents[0]);
+    }
+
     if (this.drawMode === 'none' || !param || !param.point || !this.candleSeries) return;
     const L = this.lwc();
     const price = this.candleSeries.coordinateToPrice(param.point.y);
@@ -588,6 +616,17 @@ export class ChartView {
       return;
     }
 
+    const invEvents = this.investmentEventsByTime.get(timeKey(param.time));
+    if (invEvents && invEvents.length) {
+      const detail = formatMarkerDetail(invEvents[0]);
+      this.tooltip.innerHTML = `<strong>${detail.title}</strong>${
+        detail.lines.map((line) => `<div>${line}</div>`).join('')
+      }`;
+      this.tooltip.classList.remove('hidden');
+      this.positionTooltip(param);
+      return;
+    }
+
     const signalEvent = this.signalEventByTime.get(timeKey(param.time));
     if (signalEvent) {
       this.tooltip.innerHTML = buildSignalTooltipHtml(signalEvent);
@@ -629,6 +668,10 @@ export class ChartView {
     if (!strip) return;
     strip.innerHTML = buildSignalTooltipHtml(event);
     strip.classList.remove('hidden');
+  }
+
+  showInvestmentDetail(marker) {
+    renderInvestmentDetail(marker);
   }
 
   resize() {
