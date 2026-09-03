@@ -21,8 +21,8 @@ export class ScannerController {
       assetClass: 'all',
       realHoldings: false,
       tracking: false,
-      sortKey: 'symbol',
-      sortDir: 'asc',
+      sortKey: 'price',
+      sortDir: 'desc',
       now: Date.now()
     };
     this.selectedSymbol = null;

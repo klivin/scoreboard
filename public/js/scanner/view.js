@@ -143,17 +143,17 @@ export class ScannerView {
             <option value="assetClass">Asset class</option>
             <option value="real">REAL</option>
             <option value="tracking">TRACKING</option>
-            <option value="price">Price</option>
+            <option value="price" selected>Price</option>
           </select>
         </label>
         <label>Dir
           <select id="scanner-sort-dir">
             <option value="asc">Asc</option>
-            <option value="desc">Desc</option>
+            <option value="desc" selected>Desc</option>
           </select>
         </label>
       </div>
-      <p class="scanner-count">${rows.length} row${rows.length === 1 ? '' : 's'} shown</p>
+      <p class="scanner-count">${rows.length} row${rows.length === 1 ? '' : 's'} shown · ${rows.filter((r) => r.currentPrice != null).length} with price · rest missing (not 0)</p>
       <div class="scanner-table-wrap">
         ${this.tableHtml(rows, selected)}
       </div>
