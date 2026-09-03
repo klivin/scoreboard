@@ -153,6 +153,7 @@ export class ScannerView {
           </select>
         </label>
       </div>
+      <p class="scanner-count">${rows.length} row${rows.length === 1 ? '' : 's'} shown</p>
       <div class="scanner-table-wrap">
         ${this.tableHtml(rows, selected)}
       </div>
@@ -199,7 +200,11 @@ export class ScannerView {
         ? `${escapeHtml(row.flip.next || '')} ${escapeHtml(when(row.flip.lastFlipAt))}`
         : '<span class="scanner-missing">missing</span>';
       return `<tr class="scanner-row${sel}" data-symbol="${symbol}" tabindex="0">
-        <td><strong>${symbol}</strong> ${badges}<div class="scanner-name">${escapeHtml(row.name || '')}</div></td>
+        <td class="scanner-sticky">
+          <strong>${symbol}</strong> ${badges}
+          <div class="scanner-name">${escapeHtml(row.name || '')}</div>
+          <div class="scanner-row-actions">${trackBtn}</div>
+        </td>
         <td>${escapeHtml(row.assetClass || 'unknown')}</td>
         <td>${escapeHtml(money(row.currentPrice))}</td>
         <td>${freshnessCell(row.liquidity)}</td>
@@ -210,7 +215,6 @@ export class ScannerView {
         <td>${consensusCell(row.consensus)}</td>
         <td>${backtestCell(row.backtest)}</td>
         <td>${contextCell(row.context)}</td>
-        <td>${trackBtn}</td>
       </tr>`;
     }).join('');
 
@@ -228,7 +232,6 @@ export class ScannerView {
           <th>Consensus</th>
           <th>Backtest</th>
           <th>ETF / OI / corr</th>
-          <th></th>
         </tr>
       </thead>
       <tbody>${body}</tbody>

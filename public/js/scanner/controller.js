@@ -228,6 +228,11 @@ export class ScannerController {
 
   async refresh() {
     this.filters.now = Date.now();
+    if (this.investments && this.investments.store && typeof this.investments.store.load === 'function') {
+      this.investments.store.load();
+    } else {
+      this.fallback.load();
+    }
     try {
       const extra = [];
       const state = this.investmentsState();

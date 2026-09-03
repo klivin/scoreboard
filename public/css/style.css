@@ -811,6 +811,33 @@ button:hover {
   background: #ede9fe;
 }
 
+.scanner-count {
+  font-size: 0.85rem;
+  color: #6b7280;
+  margin: 0 0 8px;
+}
+
+.scanner-sticky {
+  position: sticky;
+  left: 0;
+  background: white;
+  min-width: 160px;
+  z-index: 1;
+  box-shadow: 1px 0 0 #eee;
+}
+
+.scanner-row.selected .scanner-sticky {
+  background: #ede9fe;
+}
+
+.scanner-row:hover .scanner-sticky {
+  background: #f5f3ff;
+}
+
+.scanner-row-actions {
+  margin-top: 6px;
+}
+
 .scanner-name {
   color: #888;
   font-size: 0.75rem;
