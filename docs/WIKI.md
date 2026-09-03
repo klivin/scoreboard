@@ -424,13 +424,80 @@ generateForecast(data, horizonDays) {
 - **MAE** (Mean Absolute Error) - Average prediction error
 - **MAPE** (Mean Absolute Percentage Error) - Percentage error
 
-### Forecast Cards
+### Forecast Cards (Overview generate)
 - **Horizons:** 1d, 7d, 30d
 - **Sided prediction:** LONG/SHORT/NEUTRAL
 - **Confidence bands:** Upper/lower bounds
 - **Steelman analysis:** Pro case + Con case
 - **MAE comparison:** "Naive baseline wins on recent MAE" or "Trend model shows lower MAE"
 - **Recommendation:** Based on confidence and change %
+
+### Scored forecast history (Forecasts tab)
+
+**Status:** doing (second product slice). Research/paper only.
+
+The Forecasts tab lists **walk-forward scored records**, not just the latest generate-card. Each record is produced by the existing trend/naive model on a historical as-of slice (`series[0..i]`). The actual is the close on the UTC day `asOf + horizonDays`. Prices and outcomes are never invented.
+
+```
+as-of bar t
+  → generateForecast(series[0..t], horizonDays)   // trend point + bands + naive
+  → target = asOfTimestamp + horizonDays (UTC days)
+  → look up close on that UTC day in the full series
+  → status + MAE only when that close exists
+```
+
+**Status machine**
+
+| Status | When | MAE / direction |
+|---|---|---|
+| `too-early` | Last available series bar is still before the target UTC day | `null` (UI: n/a) — not 0 |
+| `matured` | A bar exists on the target UTC day **and** `close` is finite | `\|predicted − actual\|` and `\|naive − actual\|`; direction hit vs as-of price |
+| `missing-actual` | Target day is in-series (last bar ≥ target day) but that day’s close is blank or the bar is absent | `null` — not 0 |
+
+**Horizons:** `weekly` = 7 UTC days, `monthly` = 30 UTC days (same day-count as the signal-engine weekly/monthly windows; still daily bars).
+
+**Record (schemaVersion 1)**
+
+```
+{
+  id, symbol, horizon, horizonDays, interval,
+  asOfTimestamp, asOfDateUtc, asOfPrice,
+  model, modelVersion,                 // trend / trend-v1
+  predicted: { point, lower, upper },
+  naive: { point },
+  confidence,
+  features: { lastPrice, trendPct, volatilityPct, ma20, … finite only },
+  rationale: { side, recommendation, changePercent, proCase, conCase },
+  actual: { close, timestamp, dateUtc } | null,
+  score: { mae, naiveMae, direction, naiveDirection, maeVsNaive },
+  status, targetTimestamp
+}
+```
+
+**Stores (schema-versioned, migratable)**
+
+| Store | Key / file | Role |
+|---|---|---|
+| Server | `store/forecasts.json` (Firestore collection `forecasts`) | Canonical history. File wrapper `{ schemaVersion, namespace, items }`. Unversioned `{ items }` from v1 generate-cards is migrated, never discarded. |
+| Client | `scoreboard.forecasts` localStorage | Cached records + filter settings (`holdingsFilter`, `horizonFilter`). Own namespace — not mixed with `scoreboard.investments`. |
+
+Migrations live in `src/model/forecast-schema.js` (server) and `public/js/forecasts/schema.js` (client).
+
+**Holdings filter:** reads Investments `scoreboard.investments` collections (`events` = REAL symbols; `paperTrades` + `tracking` = TRACKING). If both are empty, the filter is **inactive** — the tab shows every forecast and says so.
+
+**Click → Overview:** payload `{ chartJumpTimestamp, rationale, features, symbol, horizon }`. Overview time scale jumps to a window around `asOfTimestamp` and the rationale/features strip fills. No new prices are drawn.
+
+**Seed:** `GET /api/forecasts` rescores stored rows against current series. If the store is empty it walk-forwards available 1d series. If the Flow pack is not mounted it uses the **labeled** backtest fixture (`src/model/fixtures/backtest-pack.js`) and sets `dataSource: "fixture"`.
+
+**Export:** JSON/CSV of the currently filtered list (client Blob). MAE cells that are not matured stay empty/`n/a`, never `0`.
+
+**API**
+
+```
+GET /api/forecasts
+GET /api/forecasts?format=csv
+GET /api/forecast?symbol=BTC&horizon=weekly|monthly|7|30
+```
 
 ---
 
@@ -441,11 +508,15 @@ generateForecast(data, horizonDays) {
 **Directory:** `store/`
 
 **Collections:**
-- `forecasts.json` - Forecast predictions and metadata
+- `forecasts.json` - Schema-versioned scored forecast history (`{ schemaVersion, namespace, items }`). Unversioned generate-cards are migrated; MAE is never invented as 0
 - `error_logs.json` - MAE/MAPE plus ingest gap / refresh errors
 - `universe.json` - Crypto universe data
 - `ingest_watermarks.json` - Per-source `{ lastTimestamp, lastSuccessAt, rowCount }`
 - `ingest_series.json` - Upserted adapter rows (natural key `source:symbol:interval:timestamp`)
+
+**Browser local stores (separate namespaces):**
+- `scoreboard.investments` — Investments tab (REAL / TRACKING)
+- `scoreboard.forecasts` — Forecasts tab cache + filter settings
 
 These server-side files are **not** used for brokerage imports. Investments use a separate browser namespace (`scoreboard.investments`).
 
@@ -578,6 +649,8 @@ npm test
 - Naive baseline forecaster
 - MAE/MAPE error metrics
 - Forecast generation
+- Forecast maturity (`too-early` / `matured` / `missing-actual`) and MAE vs naive (never fake 0)
+- Forecasts tab REAL/TRACKING filter + click payload
 - Signal strategies (synthetic crosses, RSI recovery, lookahead)
 - Consensus aggregation
 - Backtest metrics (drawdown, CAGR, simulateTrades)
@@ -627,6 +700,8 @@ scoreboard/
 │   ├── js/
 │   │   ├── app.js
 │   │   ├── controller.js
+│   │   ├── forecasts/     # Forecasts tab (list, filter, export, click jump)
+│   │   ├── investments/   # Investments tab (local import)
 │   │   └── view.js
 │   └── index.html
 ├── src/                   # Backend
@@ -634,6 +709,9 @@ scoreboard/
 │   │   └── api.js
 │   ├── model/
 │   │   ├── forecast.js
+│   │   ├── forecast-schema.js
+│   │   ├── forecast-score.js
+│   │   ├── forecast-history.js
 │   │   ├── backtest.js
 │   │   ├── signals/
 │   │   ├── indicators.js
@@ -760,6 +838,16 @@ scoreboard.investments
 ---
 
 ## Changelog
+
+### Forecasts tab (scored history, second product slice)
+- Forecasts tab lists walk-forward scored records: symbol, horizon, as-of, predicted range/point, confidence, model/version, actual, MAE vs naive, status
+- Status `too-early` | `matured` | `missing-actual`. MAE is `null` unless matured — never a fake 0
+- Click jumps Overview to the as-of timestamp and shows rationale/features
+- REAL / TRACKING filter reads `scoreboard.investments`; empty store → filter inactive, all rows shown
+- Weekly / monthly horizon filters; JSON/CSV export of the filtered list
+- Schema-versioned server `store/forecasts.json` + client `scoreboard.forecasts` with migrations
+- Reuses `src/model/forecast.js`. Fixture seed when Flow pack is absent (labeled, not live)
+- Status: **doing**
 
 ### Investments tab (first slice, local-only)
 - Investments tab: empty state, privacy warning, local file import, preview + Commit

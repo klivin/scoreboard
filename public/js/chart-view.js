@@ -9,6 +9,7 @@ import { buildTooltipLines, formatPrice as formatPriceLabel } from './chart-tool
 import { buildSignalTooltipHtml } from './signal-panel.js';
 import { toChartMarker, formatMarkerDetail } from './investments/markers.js';
 import { renderInvestmentDetail } from './investments/view.js';
+import { formatRationaleHtml, visibleRangeAroundTimestamp } from './forecasts/click.js';
 
 const DEFAULT_VIEWPORT_DAYS = 5;
 
@@ -629,6 +630,50 @@ export class ChartView {
 
   resetViewport() {
     this.applyDefaultViewport();
+  }
+
+  jumpToTimestamp(timestampMs, options = {}) {
+    const range = visibleRangeAroundTimestamp(timestampMs, options);
+    if (!range) return null;
+
+    let row = null;
+    if (Number.isFinite(timestampMs)) {
+      row = this.rowByTime.get(Math.floor(timestampMs / 1000)) || null;
+      if (!row && this.data) {
+        let bestDist = Infinity;
+        for (const candidate of this.data) {
+          if (!candidate || !Number.isFinite(candidate.timestamp)) continue;
+          const dist = Math.abs(candidate.timestamp - timestampMs);
+          if (dist < bestDist) {
+            bestDist = dist;
+            row = candidate;
+          }
+        }
+      }
+    }
+
+    if (this.chart && typeof this.chart.timeScale === 'function') {
+      try {
+        this.chart.timeScale().setVisibleRange(range);
+      } catch (error) {
+        console.warn('forecast jump range skipped', error);
+      }
+    }
+    if (row) this.updateDayStrip(row);
+    this.lastJump = { timestamp: timestampMs, range, row };
+    return { timestamp: timestampMs, range, row };
+  }
+
+  showForecastRationale(payload) {
+    const strip = document.getElementById('forecast-rationale-strip');
+    if (!strip) return;
+    if (!payload) {
+      strip.classList.add('hidden');
+      strip.innerHTML = '';
+      return;
+    }
+    strip.innerHTML = formatRationaleHtml(payload);
+    strip.classList.remove('hidden');
   }
 
   clearDrawings() {

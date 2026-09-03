@@ -466,6 +466,32 @@ curl -sS 'http://localhost:3000/api/series?symbol=BTC&interval=1h&sinceCursor=ok
 
 ---
 
+### Forecasts tab (scored history)
+**Status:** doing  
+**Request:** The Forecasts tab must list **actual scored forecasts**, not a dead generate-cards page. Second product slice after Investments. Research/paper only — no keys, no trades, not Pooli.
+
+**Must ship:**
+1. Functional Forecasts tab listing forecasts by symbol, horizon, as-of timestamp
+2. Each row: predicted range/point, confidence, model/version, actual outcome when matured, MAE/direction vs naive, status (`too-early` | `matured` | `missing-actual`)
+3. Click a forecast: jump Overview chart to that as-of timestamp and show rationale/features used
+4. Filter by REAL holdings vs TRACKING assets via Investments local store `scoreboard.investments`. If that store is empty, show all forecasts and note the holdings filter is inactive
+5. Weekly / monthly horizon filters
+6. Persist forecast history in a schema-versioned local **and** server store with migrations. Reuse `src/model/forecast.js` (trend + naive) — do not invent prices or outcomes
+7. When actuals are unavailable, status is too-early or missing-actual. **Never fake 0 MAE**
+8. Export JSON/CSV of the (filtered) forecast list
+
+**Honesty:**
+- Outcomes come from the same series closes used by Overview (Flow pack / ingest store) or, when the pack is absent, the labeled deterministic fixture already used by backtest. Fixture closes are not live market claims.
+- Missing or not-yet-elapsed actuals stay `missing` / `too-early`. MAE fields stay `null` (UI: `n/a`), never `0`.
+
+**Verification:**
+- `npm test` — maturity transitions, MAE vs naive on synthetic matured cases, REAL/TRACKING filter, click payload includes chart jump timestamp + rationale
+- Localhost: Forecasts tab lists scored rows (fixture or pack). Empty state is honest if nothing can be scored. Click jumps Overview. Investments and Overview stay intact.
+
+**Priority:** High
+
+---
+
 ## Future Enhancements
 
 ### Supertrend/ATR regime filter (signal strategy e)

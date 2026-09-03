@@ -213,6 +213,19 @@ test('fitAll and resetViewport change the visible range', () => {
   assert.notStrictEqual(mockChart._state.visibleLogicalRange.to, manualRange.to);
 });
 
+test('jumpToTimestamp sets visible range around the as-of bar', () => {
+  const { view, mockChart } = setupChartView({ from: 0, to: 10 });
+  const asOf = Date.parse('2026-08-10T00:00:00Z');
+  const jumped = view.jumpToTimestamp(asOf);
+  assert.ok(jumped);
+  assert.strictEqual(jumped.timestamp, asOf);
+  const expectedFrom = Math.floor(asOf / 1000) - 5 * 86400;
+  const expectedTo = Math.floor(asOf / 1000) + 2 * 86400;
+  assert.deepStrictEqual(jumped.range, { from: expectedFrom, to: expectedTo });
+  assert.strictEqual(mockChart._state.visibleLogicalRange.from, expectedFrom);
+  assert.strictEqual(mockChart._state.visibleLogicalRange.to, expectedTo);
+});
+
 test('restoreVisibleRange falls back to time range when logical range unavailable', () => {
   const { view } = setupChartView({ from: 0, to: 1 });
   const timeScale = {
