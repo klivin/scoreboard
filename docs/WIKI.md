@@ -23,6 +23,8 @@ Scoreboard is a crypto market analysis and forecasting dashboard built with vani
 - `series.js` - Series data model, loads by symbol from indicators_daily.csv
 - `indicators.js` - Technical indicator calculations (MA, Ichimoku)
 - `forecast.js` - Forecasting engine (naive baseline, trend model, MAE/MAPE)
+- `signals/` - Extensible signal engine (EMA, MACD, RSI recovery, Ichimoku) + consensus
+- `backtest.js` - Walk-forward backtest vs buy-and-hold and naive baseline
 - `ingest.js` - Data loading from overlay and repo paths
 - `store.js` - Local JSON storage (forecasts, errors, universe)
 - `store-adapter.js` - Abstraction layer for local/Firestore backends
@@ -223,6 +225,104 @@ Loaded from `indicators_daily.csv` columns: `tenkan, kijun, senkou_a, senkou_b, 
 
 ---
 
+## Signal Engine (research only)
+
+**Not a trade bot.** Scoreboard exposes algorithmic **signage** for research: which rules would have fired, with inputs and invalidation text. No wallet access, no order routing, no keys.
+
+### Architecture
+
+```
+src/model/signals/
+  params.js          — weekly vs monthly parameter sets
+  indicators.js      — true EMA, MACD, RSI, ATR helpers (not pack SMA masquerading as EMA)
+  ema-crossover.js   — golden/death cross on true EMA fast/slow
+  macd-cross.js      — MACD line vs signal from close
+  rsi-recovery.js    — oversold/overbought recovery (not naive RSI<30)
+  ichimoku.js        — pack tenkan/kijun/senkou + chikou confirmation
+  index.js           — registry, walk-forward evaluate, consensus
+  lookahead.js       — slice-at-t utilities for no-lookahead tests
+```
+
+Each strategy implements:
+
+```javascript
+{ id, name, horizon, evaluate(series, { horizon }) → [{
+  timestamp, signal: 'BUY'|'SELL'|'CLOSE',
+  score, confidence, inputs, invalidation
+}]}
+```
+
+### MA type discipline
+
+| Display | Pack column | Type in pack | Used by signal engine |
+|---------|-------------|--------------|------------------------|
+| MA20 | `ma20` | EMA | Chart overlay only; EMA cross **recomputes** true EMA20 from close |
+| MA50 | `ma50` | **SMA** | Chart overlay only; EMA cross uses **true EMA50 from close**, never `ma50` |
+| MACD | — | — | Computed from close (12/26/9 weekly, 26/52/18 monthly) |
+| Ichimoku | `tenkan,kijun,senkou_*` | Pack | Used directly; not recomputed |
+
+### RSI recovery rule
+
+Not `RSI < 30 → BUY`. Requires:
+1. RSI was below 30 (oversold) on a prior bar
+2. RSI **crosses back above** 30 → BUY
+3. Symmetric for overbought: was above 70, crosses back below 70 → SELL
+
+### Consensus
+
+Enabled strategies vote per bar. Consensus returns:
+- `score` in \[-1, 1\] and `scorePercent` in \[0, 100\]
+- `direction`: BUY | SELL | CLOSE | NEUTRAL
+- `breakdown[]`: each strategy’s signal, inputs, reason, invalidation
+
+Never a bare magic BUY/SELL without explanation.
+
+### Horizons
+
+| Horizon | EMA cross | MACD | RSI period |
+|---------|-----------|------|------------|
+| weekly | 20 / 50 | 12 / 26 / 9 | 14 |
+| monthly | 50 / 200 | 26 / 52 / 18 | 21 |
+
+Same daily bar series; longer windows for monthly swing context.
+
+### Chart integration
+
+- `GET /api/trading-signals?symbol=BTC&interval=1d&horizon=weekly&strategies=ema-crossover,macd-cross,...`
+- Markers on price pane (BUY green up, SELL red down, CLOSE gray)
+- Hover/click shows consensus + per-algorithm breakdown
+- UI panel: enable/disable each strategy; horizon selector re-fetches
+
+### Backtest methodology
+
+File: `src/model/backtest.js`
+
+1. **Walk-forward:** at bar *t*, strategies see only `series[0..t]` (`evaluateWalkForward`)
+2. **No lookahead:** unit tests assert no index > *t* is read; entries/exits fill at **next bar open** (not same-bar close)
+3. **Costs:** default 10bps fee + 10bps slippage each way (configurable)
+4. **Metrics per strategy and consensus:** precision/recall (5-bar forward label), hit rate (trade PnL), max drawdown, CAGR/total return, turnover, sample size
+5. **Baselines:** buy-and-hold; naive forecaster (`naiveBaseline` — last price, long when forecast > close)
+
+Reproduce:
+
+```bash
+npm run backtest              # BTC + ETH, weekly
+npm run backtest -- --symbol BTC --horizon monthly
+```
+
+Outputs: `store/backtest_{SYMBOL}_{horizon}.json`, `_trades.csv`, `_report.md`
+
+When Flow pack is not mounted, backtest uses a **deterministic OHLC fixture** (`src/model/fixtures/backtest-pack.js`) — results are reproducible in CI but are **not** live market claims. Mount the pack at `/workspace/scoreboard/` or `./data/` for real fixture history.
+
+### API
+
+```
+GET /api/trading-signals?symbol=BTC&interval=1d&horizon=weekly
+GET /api/backtest?symbol=BTC&horizon=weekly&format=json|markdown
+```
+
+---
+
 ## Forecasting
 
 ### Naive Baseline
@@ -328,6 +428,8 @@ GET /api/forecasts
 ### Market Signals
 ```
 GET /api/signals?symbol=BTC
+GET /api/trading-signals?symbol=BTC&interval=1d&horizon=weekly
+GET /api/backtest?symbol=BTC&horizon=weekly
 GET /api/universe
 GET /api/missing
 ```
@@ -384,9 +486,12 @@ npm test
 - Naive baseline forecaster
 - MAE/MAPE error metrics
 - Forecast generation
+- Signal strategies (synthetic crosses, RSI recovery, lookahead)
+- Consensus aggregation
+- Backtest metrics (drawdown, CAGR, simulateTrades)
 - Edge cases (empty data, nulls, single points)
 
-**Status:** ✅ 13/13 tests passing
+Run backtest report: `npm run backtest`
 
 ### Integration Tests
 ```bash
@@ -560,6 +665,6 @@ After updates, users may need to clear browser cache to see changes. Hard refres
 
 ---
 
-**Last Updated:** 2026-09-01  
-**Version:** v1.1 (chart library + 1h/zoom)  
+**Last Updated:** 2026-09-03  
+**Version:** v1.2 (signal engine + backtest, research only)  
 **Status:** Kevin chart ask done on localhost. Not Pooli.

@@ -6,7 +6,8 @@
   "type": "module",
   "scripts": {
     "start": "node src/server.js",
-    "test": "node --test src/model/*.test.js src/**/*.test.js public/js/*.test.js",
+    "test": "node --test src/model/*.test.js src/model/**/*.test.js src/**/*.test.js public/js/*.test.js",
+    "backtest": "node scripts/backtest-report.js",
     "dev": "node --watch src/server.js"
   },
   "keywords": ["crypto", "forecasting", "analysis"],

@@ -362,7 +362,13 @@ npm start
 
 ## Future Enhancements
 
-### 🔲 5x/Day Probe
+### Supertrend/ATR regime filter (signal strategy e)
+**Status:** open  
+**Request:** Optional Supertrend/ATR regime filter as fifth signal strategy and consensus voter  
+**Blockers:** Not implemented in first signal-engine slice  
+**Priority:** Medium
+
+---
 **Status:** open  
 **Request:** Automated data refresh 5 times per day  
 **Implementation Ideas:**
@@ -484,6 +490,33 @@ npm start
 
 ---
 
+### Signal engine + walk-forward backtest (research signage)
+**Status:** doing  
+**Request:** Extensible signal engine with chart markers, strategy toggles, horizon selector (weekly/monthly), walk-forward backtest vs buy-and-hold and naive baseline. **Research/paper only — no execution, no keys, no trades.**
+
+**Shipped in this slice (first pass, not finished product):**
+- `src/model/signals/` — EMA 20/50 crossover (true EMA50, not pack SMA), MACD 12/26/9 from close, RSI(14) recovery (cross back above 30 / below 70), Ichimoku trend confirmation from pack tenkan/kijun/senkou
+- Consensus aggregator with transparent 0–100 score and per-strategy breakdown
+- `src/model/backtest.js` — walk-forward, next-bar-open fills, 10bps fee/slippage (configurable)
+- `npm run backtest` — regenerates report + JSON/CSV in `store/`
+- Chart markers + hover/click tooltip with algorithm inputs, consensus, invalidation
+- Strategy toggle panel + weekly/monthly horizon selector
+- API: `GET /api/trading-signals`, `GET /api/backtest`
+
+**Not shipped / open:**
+- Supertrend/ATR regime filter (optional strategy e) — **open**
+- Interactive equity-curve backtest visualization tab
+- Full out-of-sample validation on live Flow pack when mounted (CI uses deterministic fixture when pack absent)
+
+**Verification:**
+- `npm test` passes (lookahead, per-strategy synthetic tests, consensus, backtest metrics)
+- `npm run backtest` prints report with actual numbers vs baselines
+- Localhost: signal markers on BTC 1d when data loaded; toggles re-fetch signals
+
+**Priority:** High (research foundation)
+
+---
+
 ## Completed Milestones
 
 ### Scoreboard v1.0 ✅
@@ -538,6 +571,6 @@ npm start
 
 ---
 
-**Last Updated:** 2026-09-01  
+**Last Updated:** 2026-09-03  
 **Maintainer:** Kevin (reviewer), updated by Scoreboard team  
 **Status Tracking:** This file updated as features ship
