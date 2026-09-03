@@ -494,6 +494,14 @@ curl -sS 'http://localhost:3000/api/series?symbol=BTC&interval=1h&sinceCursor=ok
 - REAL / TRACKING badges respected when Investments store has them
 - Row click still loads Overview for that symbol
 
+**Localhost UI (2026-09-03, this host — no Flow pack; OKX incremental filled BTC 1d):**
+- Universe: research-only banner; 100 rows after CoinGecko refresh; count “1 with price · rest missing (not 0)”
+- BTC (after refresh): live price ~$80,976, 1d/7d/30d BULLISH, consensus BUY — not a fabricated rank
+- AAVE/ADA/alts without series: every market cell **missing**, never 0
+- Asset class = Stock: honest empty state
+- Investments start-track ETH @ 2000 → Universe TRACKING badge; Remove Tracking keeps history; evaluation baseline $2,000, status stopped, model/actual **missing** (no ETH series)
+- BTC row click opens Overview with symbol BTC
+
 **Priority:** High
 
 ---
