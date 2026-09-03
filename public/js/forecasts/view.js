@@ -24,6 +24,17 @@ function formatPct(value) {
   return `${value.toFixed(1)}%`;
 }
 
+function formatAsOf(row) {
+  if (row && row.asOfDateUtc && /^\d{4}-\d{2}-\d{2}$/.test(String(row.asOfDateUtc))) {
+    return row.asOfDateUtc;
+  }
+  if (row && Number.isFinite(row.asOfTimestamp)) {
+    const date = new Date(row.asOfTimestamp);
+    if (!Number.isNaN(date.getTime())) return date.toISOString().slice(0, 10);
+  }
+  return (row && row.asOfDateUtc) || 'n/a';
+}
+
 function statusClass(status) {
   if (status === 'matured') return 'fc-status-matured';
   if (status === 'missing-actual') return 'fc-status-missing';
@@ -135,7 +146,7 @@ export class ForecastsView {
     return `<tr class="fc-row${selected}" data-forecast-id="${escapeHtml(row.id || '')}">
       <td>${escapeHtml(row.symbol || 'n/a')}${row.dataSource === 'fixture' ? ' <span class="fc-fixture">fixture</span>' : ''}</td>
       <td>${escapeHtml(row.horizon || 'n/a')}</td>
-      <td>${escapeHtml(row.asOfDateUtc || 'n/a')}</td>
+      <td>${escapeHtml(formatAsOf(row))}</td>
       <td>${formatMoney(pred.point)}</td>
       <td>${formatMoney(pred.lower)} – ${formatMoney(pred.upper)}</td>
       <td>${formatPct(row.confidence)}</td>

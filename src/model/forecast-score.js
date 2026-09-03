@@ -214,7 +214,7 @@ export function buildScoredForecast({
     horizonDays,
     interval,
     asOfTimestamp: asOf.timestamp,
-    asOfDateUtc: asOf.date_utc || formatDateUtc(asOf.timestamp),
+    asOfDateUtc: formatDateUtc(asOf.timestamp) || asOf.date_utc || null,
     asOfPrice: asOf.close,
     model: generated.method,
     modelVersion: FORECAST_MODEL_VERSION,
