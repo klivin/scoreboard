@@ -467,7 +467,7 @@ curl -sS 'http://localhost:3000/api/series?symbol=BTC&interval=1h&sinceCursor=ok
 ---
 
 ### E*TRADE Activity CSV preamble + #/$ headers
-**Status:** doing  
+**Status:** done  
 **Request:** E*TRADE Activity exports put a title / account / `Total:` preamble before the real header (around line 7). Import was treating line 1 as the header and failing with “No recognized Activity CSV columns”, then every data row as “no usable Activity/Trade or Transaction Date” / “unsupported activity type”. Headers also ship as `Quantity #`, `Price $`, `Amount $`.
 
 **Must ship:**
@@ -477,8 +477,27 @@ curl -sS 'http://localhost:3000/api/series?symbol=BTC&interval=1h&sinceCursor=ok
 4. Synthetic fixture only — do **not** commit Kevin’s private CSV or real account numbers/symbols. Import stays FileReader / local-only
 
 **Verification:**
-- `npm test` — preamble fixture finds columns; FAKE1 Bought/Sold/Bought To Open become REAL lots; Dividend / Option Expired / Exchange rows are preserved as non-fills; no “No recognized Activity CSV columns”
-- Local synthetic CSV (Investments tab file picker): preview commits; nothing leaves the browser
+- `npm test` — 147/147. Preamble fixture finds columns; FAKE1 Bought/Sold/Bought To Open become REAL lots (qty 8, basis $190, realized $59.60); Dividend / Option Expired / Exchange rows are preserved as non-fills; no “No recognized Activity CSV columns”
+- Localhost UI (2026-09-05, synthetic CSV only — not Kevin’s E*TRADE file): Investments tab privacy warning + file picker; preamble + `Quantity #`/`Price $`/`Amount $` preview listed buy/sell/dividend/expired/exchange as REAL; Commit enabled. After commit: FAKE1 qty 8, basis $190, realized $59.60, dividends $12.50. Mapping warnings on expired/exchange only (not abort). File stays in the browser.
+
+**Shipped:** Investments CSV parser scans for the real header; `#`/`$` suffixes normalize to Quantity/Price/Amount. Helper: `buildEtradePreambleCsv` in `public/js/investments/csv.js`.
+
+**Local synthetic CSV to try:**
+```
+Investment Transactions Activity Types
+
+Account Activity for Synthetic Account -0000 from 2025-01-01 to 2026-09-03
+
+Total:,20519.86
+
+Activity/Trade Date,Transaction Date,Settlement Date,Activity Type,Description,Symbol,Cusip,Quantity #,Price $,Amount $,Commission,Category,Note
+08/10/2026,08/10/2026,08/12/2026,Bought,SYNTHETIC BUY FAKE1,FAKE1,SYN-FAKE1,10,25,-250,1,Trade,synthetic-bought
+08/12/2026,08/12/2026,08/14/2026,Bought To Open,SYNTHETIC OPEN FAKE1,FAKE1,SYN-FAKE1,2,20,-40,,Trade,synthetic-bought-to-open
+08/20/2026,08/20/2026,08/22/2026,Sold,SYNTHETIC SELL FAKE1,FAKE1,SYN-FAKE1,4,40,160,,Trade,synthetic-sold
+06/01/2026,06/01/2026,06/01/2026,Qualified Dividend,SYNTHETIC DIVIDEND FAKE1,FAKE1,SYN-FAKE1,,,12.5,,Dividend,synthetic-dividend
+05/01/2026,05/01/2026,05/01/2026,Option Expired,SYNTHETIC OPTION EXPIRED,FAKE3,,1,0,0,,Option,synthetic-option-expired
+```
+Save as `synthetic-etrade-activity.csv`, `npm start`, Investments tab → choose file → preview → Commit. Do not use Kevin’s real export.
 
 ---
 
@@ -760,6 +779,6 @@ curl -sS 'http://localhost:3000/api/series?symbol=BTC&interval=1h&sinceCursor=ok
 
 ---
 
-**Last Updated:** 2026-09-03  
+**Last Updated:** 2026-09-05  
 **Maintainer:** Kevin (reviewer), updated by Scoreboard team  
 **Status Tracking:** This file updated as features ship

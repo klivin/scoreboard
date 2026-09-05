@@ -936,7 +936,7 @@ scoreboard.investments
 - Schema-versioned `scoreboard.investments` store; REAL vs TRACKING never mix
 - FIFO + average-cost lots; paper BUY/SELL; start/stop tracking preserves history
 - Transaction markers on asset charts; local CSV/JSON export
-- Activity CSV: scan for the real header after E*TRADE preamble; normalize `Quantity #` / `Price $` / `Amount $`
+- Activity CSV: scan for the real header after E*TRADE preamble; normalize `Quantity #` / `Price $` / `Amount $` (**done**, 2026-09-05; synthetic fixture only)
 - Tests: synthetic CSV only (including preamble + `#`/`$` headers). Real brokerage files are not in-repo and were not imported
 - Localhost UI (synthetic CSV): empty state + privacy warning, preview/Commit, REAL vs TRACKING, paper BUY, start/stop keeps history
 - Chart markers unit-tested; live candle overlay not visually confirmed on this host (no Flow pack)
@@ -1001,6 +1001,6 @@ scoreboard.investments
 
 ---
 
-**Last Updated:** 2026-09-03  
+**Last Updated:** 2026-09-05  
 **Version:** v1.6 (Universe money-scanner)  
 **Status:** Not Pooli. No keys client-side. No trades. Import stays in-browser.
