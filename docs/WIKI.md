@@ -33,7 +33,7 @@ Scoreboard is a crypto market analysis and forecasting dashboard built with vani
 **Investments (browser-local, not the chart store)** (`public/js/investments/`)
 - `schema.js` - `schemaVersion` + collection namespaces + migrations
 - `store.js` - `localStorage` key `scoreboard.investments` only (never `store/*.json`)
-- `csv.js` / `parse.js` / `validate.js` - Activity CSV parse, normalize, preview
+- `csv.js` / `parse.js` / `validate.js` - Activity CSV parse (header-row scan + `#`/`$` header normalize), preview
 - `lots.js` - FIFO and average-cost lots, P&L, drawdown (REAL and TRACKING separate)
 - `tracking.js` - paper BUY/SELL + start/stop tracking (always TRACKING)
 - `markers.js` / `export.js` - chart marker payloads + local CSV/JSON export
@@ -898,6 +898,10 @@ scoreboard.investments
 
 **REAL vs TRACKING:** confirmed imported holdings/transactions are REAL. Watchlist, paper marks, and start/stop tracking are TRACKING. Badges appear in the tab, P&L panels, and chart markers. P&L is never mixed across badges.
 
+**CSV header scan:** E*TRADE Activity files start with a title / account / `Total:` preamble. The parser scans for a row containing `Activity/Trade Date` (or both `Activity Type` and `Symbol`) and reads data from there. Header names are matched case-insensitively after stripping trailing `#` / `$` / spaces (`Quantity #` → Quantity, `Price $` → Price, `Amount $` → Amount).
+
+**Activity types (E*TRADE):** Bought / Sold / Bought To Open → buy/sell fills when qty+price exist. Dividend / Qualified Dividend → dividend (non-fill). Option Expired → expired (non-fill). Exchange Delivered Out / Exchange Received In → exchange (non-fill; explicit map required). Unsupported types are flagged per row and do not abort the import.
+
 **Fills:** a buy/sell becomes a lot fill only when **both** quantity and price are present. Missing quantity or price is marked; no fill is inferred. Dividends, fees, exchanges, and options/expired do not invent fills. Exchanges / ticker changes / options require an explicit symbol map.
 
 **P&L:** FIFO (default) or average-cost. Realized, unrealized, cost basis, return, dividends, drawdown. Missing mark prices stay `missing`, not `0`.
@@ -932,7 +936,8 @@ scoreboard.investments
 - Schema-versioned `scoreboard.investments` store; REAL vs TRACKING never mix
 - FIFO + average-cost lots; paper BUY/SELL; start/stop tracking preserves history
 - Transaction markers on asset charts; local CSV/JSON export
-- Tests: synthetic CSV only. Real brokerage files are not in-repo and were not imported
+- Activity CSV: scan for the real header after E*TRADE preamble; normalize `Quantity #` / `Price $` / `Amount $` (**done**, 2026-09-05; synthetic fixture only)
+- Tests: synthetic CSV only (including preamble + `#`/`$` headers). Real brokerage files are not in-repo and were not imported
 - Localhost UI (synthetic CSV): empty state + privacy warning, preview/Commit, REAL vs TRACKING, paper BUY, start/stop keeps history
 - Chart markers unit-tested; live candle overlay not visually confirmed on this host (no Flow pack)
 - Status: **doing** — first-slice UI/tests passed; screenshot import and broker sync stay open
@@ -996,6 +1001,6 @@ scoreboard.investments
 
 ---
 
-**Last Updated:** 2026-09-03  
+**Last Updated:** 2026-09-05  
 **Version:** v1.6 (Universe money-scanner)  
 **Status:** Not Pooli. No keys client-side. No trades. Import stays in-browser.

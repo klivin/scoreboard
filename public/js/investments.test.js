@@ -1,6 +1,13 @@
 import { test } from 'node:test';
 import assert from 'node:assert';
-import { buildSyntheticCsv, parseActivityCsv, CANONICAL_COLUMNS } from './investments/csv.js';
+import {
+  buildSyntheticCsv,
+  buildEtradePreambleCsv,
+  parseActivityCsv,
+  CANONICAL_COLUMNS,
+  normalizeHeader,
+  mapHeader
+} from './investments/csv.js';
 import { classifyActivityType, normalizeRows, parseOptionalNumber } from './investments/parse.js';
 import { previewImport, validateEvents } from './investments/validate.js';
 import {
@@ -192,7 +199,10 @@ test('classifyActivityType covers supported kinds and leaves unknown unsupported
   assert.strictEqual(classifyActivityType('Bought'), 'buy');
   assert.strictEqual(classifyActivityType('Sold'), 'sell');
   assert.strictEqual(classifyActivityType('Qualified Dividend'), 'dividend');
+  assert.strictEqual(classifyActivityType('Bought To Open'), 'buy');
   assert.strictEqual(classifyActivityType('Exchange'), 'exchange');
+  assert.strictEqual(classifyActivityType('Exchange Delivered Out'), 'exchange');
+  assert.strictEqual(classifyActivityType('Exchange Received In'), 'exchange');
   assert.strictEqual(classifyActivityType('Option Expired'), 'expired');
   assert.strictEqual(classifyActivityType('Fee'), 'fee');
   assert.strictEqual(classifyActivityType('Wire Out'), 'unsupported');
@@ -408,6 +418,202 @@ test('local export JSON/CSV include badges and do not claim transmission', () =>
   const csv = buildExportCsv(state.collections.events);
   assert.ok(csv.includes('Badge'));
   assert.ok(csv.includes('REAL'));
+});
+
+function etradePreambleRows() {
+  return [
+    {
+      'Activity/Trade Date': '08/10/2026',
+      'Transaction Date': '08/10/2026',
+      'Settlement Date': '08/12/2026',
+      'Activity Type': 'Bought',
+      Description: 'SYNTHETIC BUY FAKE1',
+      Symbol: 'FAKE1',
+      Cusip: 'SYN-FAKE1',
+      Quantity: '10',
+      Price: '25',
+      Amount: '-250',
+      Commission: '1',
+      Category: 'Trade',
+      Note: 'synthetic-bought'
+    },
+    {
+      'Activity/Trade Date': '08/12/2026',
+      'Transaction Date': '08/12/2026',
+      'Settlement Date': '08/14/2026',
+      'Activity Type': 'Bought To Open',
+      Description: 'SYNTHETIC OPEN FAKE1',
+      Symbol: 'FAKE1',
+      Cusip: 'SYN-FAKE1',
+      Quantity: '2',
+      Price: '20',
+      Amount: '-40',
+      Commission: '',
+      Category: 'Trade',
+      Note: 'synthetic-bought-to-open'
+    },
+    {
+      'Activity/Trade Date': '08/20/2026',
+      'Transaction Date': '08/20/2026',
+      'Settlement Date': '08/22/2026',
+      'Activity Type': 'Sold',
+      Description: 'SYNTHETIC SELL FAKE1',
+      Symbol: 'FAKE1',
+      Cusip: 'SYN-FAKE1',
+      Quantity: '4',
+      Price: '40',
+      Amount: '160',
+      Commission: '',
+      Category: 'Trade',
+      Note: 'synthetic-sold'
+    },
+    {
+      'Activity/Trade Date': '06/01/2026',
+      'Transaction Date': '06/01/2026',
+      'Settlement Date': '06/01/2026',
+      'Activity Type': 'Qualified Dividend',
+      Description: 'SYNTHETIC DIVIDEND FAKE1',
+      Symbol: 'FAKE1',
+      Cusip: 'SYN-FAKE1',
+      Quantity: '',
+      Price: '',
+      Amount: '12.5',
+      Commission: '',
+      Category: 'Dividend',
+      Note: 'synthetic-dividend'
+    },
+    {
+      'Activity/Trade Date': '05/01/2026',
+      'Transaction Date': '05/01/2026',
+      'Settlement Date': '05/01/2026',
+      'Activity Type': 'Option Expired',
+      Description: 'SYNTHETIC OPTION EXPIRED',
+      Symbol: 'FAKE3',
+      Cusip: '',
+      Quantity: '1',
+      Price: '0',
+      Amount: '0',
+      Commission: '',
+      Category: 'Option',
+      Note: 'synthetic-option-expired'
+    },
+    {
+      'Activity/Trade Date': '04/01/2026',
+      'Transaction Date': '04/01/2026',
+      'Settlement Date': '04/01/2026',
+      'Activity Type': 'Exchange Delivered Out',
+      Description: 'SYNTHETIC EXCHANGE OUT',
+      Symbol: 'FAKE4',
+      Cusip: 'SYN-FAKE4',
+      Quantity: '3',
+      Price: '',
+      Amount: '',
+      Commission: '',
+      Category: 'Exchange',
+      Note: 'synthetic-exchange-out'
+    },
+    {
+      'Activity/Trade Date': '04/01/2026',
+      'Transaction Date': '04/01/2026',
+      'Settlement Date': '04/01/2026',
+      'Activity Type': 'Exchange Received In',
+      Description: 'SYNTHETIC EXCHANGE IN',
+      Symbol: 'FAKE5',
+      Cusip: 'SYN-FAKE5',
+      Quantity: '3',
+      Price: '',
+      Amount: '',
+      Commission: '',
+      Category: 'Exchange',
+      Note: 'synthetic-exchange-in'
+    }
+  ];
+}
+
+test('parseActivityCsv still rejects files with no Activity header row', () => {
+  const parsed = parseActivityCsv('Investment Transactions Activity Types\n\nTotal:,1\n');
+  assert.deepStrictEqual(parsed.errors, ['No recognized Activity CSV columns']);
+  assert.strictEqual(parsed.rows.length, 0);
+  assert.strictEqual(parsed.headerLineNumber, null);
+});
+
+test('normalizeHeader strips trailing # / $ suffixes used by E*TRADE exports', () => {
+  assert.strictEqual(normalizeHeader('Quantity #'), 'quantity');
+  assert.strictEqual(normalizeHeader('Price $'), 'price');
+  assert.strictEqual(normalizeHeader('Amount $'), 'amount');
+  assert.strictEqual(mapHeader('Quantity #'), 'Quantity');
+  assert.strictEqual(mapHeader('Price $'), 'Price');
+  assert.strictEqual(mapHeader('Amount $'), 'Amount');
+  assert.strictEqual(mapHeader('Activity/Trade Date'), 'Activity/Trade Date');
+});
+
+test('E*TRADE preamble + #/$ headers: parse finds columns and maps fills vs non-fills', () => {
+  const csv = buildEtradePreambleCsv(etradePreambleRows());
+  assert.ok(csv.startsWith('Investment Transactions Activity Types'));
+  assert.ok(csv.includes('Total:,20519.86'));
+  assert.ok(csv.includes('Quantity #,Price $,Amount $'));
+  assert.ok(!csv.includes('Wise Decisions'));
+  assert.ok(!/FAKE\d{4,}/.test(csv));
+
+  const parsed = parseActivityCsv(csv);
+  assert.ok(!parsed.errors.includes('No recognized Activity CSV columns'));
+  assert.strictEqual(parsed.errors.length, 0);
+  assert.ok(parsed.headerLineNumber >= 5);
+  assert.ok(parsed.canonicalHeaders.includes('Activity/Trade Date'));
+  assert.ok(parsed.canonicalHeaders.includes('Quantity'));
+  assert.ok(parsed.canonicalHeaders.includes('Price'));
+  assert.ok(parsed.canonicalHeaders.includes('Amount'));
+  assert.strictEqual(parsed.rows.length, etradePreambleRows().length);
+  assert.strictEqual(parsed.rows[0].record.Symbol, 'FAKE1');
+  assert.strictEqual(parsed.rows[0].record.Quantity, '10');
+  assert.strictEqual(parsed.rows[0].record.Price, '25');
+  assert.ok(parsed.rows[0].lineNumber > parsed.headerLineNumber);
+
+  const preview = previewImport(csv, { idPrefix: 'etrade_syn' });
+  assert.strictEqual(preview.privacy.serverReceivesCsv, false);
+  assert.strictEqual(preview.privacy.transmitted, false);
+  assert.ok(!preview.errors.includes('No recognized Activity CSV columns'));
+  assert.strictEqual(preview.errors.length, 0);
+  assert.strictEqual(preview.canCommit, true);
+  assert.ok(preview.events.every((event) => event.badge === 'REAL'));
+  assert.ok(!preview.warnings.some((w) => w.includes('no usable Activity/Trade or Transaction Date')));
+  assert.ok(!preview.warnings.some((w) => w.includes('unsupported activity type')));
+
+  const bought = preview.events.find((e) => e.note === 'synthetic-bought');
+  const sold = preview.events.find((e) => e.note === 'synthetic-sold');
+  const opened = preview.events.find((e) => e.note === 'synthetic-bought-to-open');
+  const dividend = preview.events.find((e) => e.note === 'synthetic-dividend');
+  const expired = preview.events.find((e) => e.note === 'synthetic-option-expired');
+  const exchangeOut = preview.events.find((e) => e.note === 'synthetic-exchange-out');
+  const exchangeIn = preview.events.find((e) => e.note === 'synthetic-exchange-in');
+
+  assert.strictEqual(bought.activityType, 'buy');
+  assert.strictEqual(bought.flags.noFillInferred, false);
+  assert.strictEqual(sold.activityType, 'sell');
+  assert.strictEqual(sold.flags.noFillInferred, false);
+  assert.strictEqual(opened.activityType, 'buy');
+  assert.strictEqual(opened.flags.noFillInferred, false);
+  assert.strictEqual(dividend.activityType, 'dividend');
+  assert.strictEqual(dividend.flags.noFillInferred, true);
+  assert.strictEqual(expired.activityType, 'expired');
+  assert.strictEqual(expired.flags.noFillInferred, true);
+  assert.strictEqual(exchangeOut.activityType, 'exchange');
+  assert.strictEqual(exchangeOut.flags.noFillInferred, true);
+  assert.strictEqual(exchangeIn.activityType, 'exchange');
+  assert.strictEqual(exchangeIn.flags.noFillInferred, true);
+
+  const pnl = computeLotsAndPnl(preview.events, { costMethod: 'fifo' });
+  const fake1 = pnl.REAL.positions.find((p) => p.symbol === 'FAKE1');
+  assert.ok(fake1);
+  assert.strictEqual(fake1.quantity, 8);
+  assert.strictEqual(fake1.costBasis, 190);
+  assert.ok(Math.abs(pnl.REAL.realizedPnl - 59.6) < 1e-9);
+  assert.strictEqual(pnl.REAL.dividendsTotal, 12.5);
+  assert.ok(pnl.REAL.closedLots.some((lot) => lot.qty === 4 && lot.sellPrice === 40));
+  assert.ok(pnl.REAL.skipped.some((s) => s.event.note === 'synthetic-option-expired'));
+  assert.ok(pnl.REAL.skipped.some((s) => s.event.note === 'synthetic-exchange-out'));
+  assert.ok(pnl.REAL.skipped.some((s) => s.event.note === 'synthetic-exchange-in'));
+  assert.ok(pnl.REAL.skipped.every((s) => s.noFillInferred === true));
 });
 
 test('validateEvents flags unsupported and mapping-required rows', () => {

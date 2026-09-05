@@ -43,7 +43,9 @@ export function normalizeHeader(name) {
     .trim()
     .toLowerCase()
     .replace(/[_]+/g, ' ')
-    .replace(/\s+/g, ' ');
+    .replace(/\s+/g, ' ')
+    .replace(/[#\$]+$/g, '')
+    .trim();
 }
 
 export function mapHeader(name) {
@@ -88,13 +90,45 @@ export function splitCsvLines(text) {
   });
 }
 
+export function isActivityHeaderRow(cells) {
+  const mapped = (cells || []).map((cell) => mapHeader(cell));
+  if (mapped.includes('Activity/Trade Date')) return true;
+  return mapped.includes('Activity Type') && mapped.includes('Symbol');
+}
+
+export function findActivityHeaderIndex(lines) {
+  for (let i = 0; i < lines.length; i += 1) {
+    if (String(lines[i] || '').trim() === '') continue;
+    if (isActivityHeaderRow(parseCsvLine(lines[i]))) return i;
+  }
+  return -1;
+}
+
 export function parseActivityCsv(text) {
-  const lines = splitCsvLines(text).filter((line) => line.trim() !== '');
-  if (lines.length === 0) {
-    return { headers: [], canonicalHeaders: [], rows: [], errors: ['CSV is empty'] };
+  const lines = splitCsvLines(text);
+  const nonEmpty = lines.filter((line) => line.trim() !== '');
+  if (nonEmpty.length === 0) {
+    return {
+      headers: [],
+      canonicalHeaders: [],
+      rows: [],
+      errors: ['CSV is empty'],
+      headerLineNumber: null
+    };
   }
 
-  const rawHeaders = parseCsvLine(lines[0]).map((h) => h.trim());
+  const headerIndex = findActivityHeaderIndex(lines);
+  if (headerIndex === -1) {
+    return {
+      headers: parseCsvLine(nonEmpty[0]).map((h) => h.trim()),
+      canonicalHeaders: [],
+      rows: [],
+      errors: ['No recognized Activity CSV columns'],
+      headerLineNumber: null
+    };
+  }
+
+  const rawHeaders = parseCsvLine(lines[headerIndex]).map((h) => h.trim());
   const canonicalHeaders = rawHeaders.map((h) => mapHeader(h));
   const errors = [];
 
@@ -103,7 +137,8 @@ export function parseActivityCsv(text) {
   }
 
   const rows = [];
-  for (let i = 1; i < lines.length; i += 1) {
+  for (let i = headerIndex + 1; i < lines.length; i += 1) {
+    if (lines[i].trim() === '') continue;
     const cells = parseCsvLine(lines[i]);
     const raw = {};
     const record = {};
@@ -120,8 +155,32 @@ export function parseActivityCsv(text) {
     });
   }
 
-  return { headers: rawHeaders, canonicalHeaders, rows, errors };
+  return {
+    headers: rawHeaders,
+    canonicalHeaders,
+    rows,
+    errors,
+    headerLineNumber: headerIndex + 1
+  };
 }
+
+const ETRADE_EXPORT_COLUMNS = [
+  'Activity/Trade Date',
+  'Transaction Date',
+  'Settlement Date',
+  'Activity Type',
+  'Description',
+  'Symbol',
+  'Cusip',
+  'Quantity #',
+  'Price $',
+  'Amount $',
+  'Commission',
+  'Category',
+  'Note'
+];
+
+export { ETRADE_EXPORT_COLUMNS };
 
 export function buildSyntheticCsv(rows, headers = CANONICAL_COLUMNS) {
   const escape = (value) => {
@@ -131,7 +190,36 @@ export function buildSyntheticCsv(rows, headers = CANONICAL_COLUMNS) {
   };
   const lines = [headers.map(escape).join(',')];
   for (const row of rows) {
-    lines.push(headers.map((header) => escape(row[header])).join(','));
+    lines.push(headers.map((header) => {
+      const canonical = mapHeader(header);
+      let value;
+      if (Object.prototype.hasOwnProperty.call(row, header)) value = row[header];
+      else if (canonical && Object.prototype.hasOwnProperty.call(row, canonical)) value = row[canonical];
+      else value = undefined;
+      return escape(value);
+    }).join(','));
   }
   return lines.join('\n');
+}
+
+/**
+ * Synthetic E*TRADE Activity export shape: title / account / Total: preamble,
+ * then a header with Quantity # / Price $ / Amount $ suffixes.
+ * Never include real account numbers or brokerage symbols.
+ */
+export function buildEtradePreambleCsv(rows, options = {}) {
+  const accountLabel = options.accountLabel || 'Synthetic Account -0000';
+  const from = options.from || '2025-01-01';
+  const to = options.to || '2026-09-03';
+  const total = options.total == null ? '20519.86' : options.total;
+  const body = buildSyntheticCsv(rows, options.headers || ETRADE_EXPORT_COLUMNS);
+  return [
+    'Investment Transactions Activity Types',
+    '',
+    `Account Activity for ${accountLabel} from ${from} to ${to}`,
+    '',
+    `Total:,${total}`,
+    '',
+    body
+  ].join('\n');
 }
