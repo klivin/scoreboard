@@ -466,6 +466,22 @@ curl -sS 'http://localhost:3000/api/series?symbol=BTC&interval=1h&sinceCursor=ok
 
 ---
 
+### E*TRADE Activity CSV preamble + #/$ headers
+**Status:** doing  
+**Request:** E*TRADE Activity exports put a title / account / `Total:` preamble before the real header (around line 7). Import was treating line 1 as the header and failing with “No recognized Activity CSV columns”, then every data row as “no usable Activity/Trade or Transaction Date” / “unsupported activity type”. Headers also ship as `Quantity #`, `Price $`, `Amount $`.
+
+**Must ship:**
+1. Scan lines for a row containing `Activity/Trade Date` (or `Activity Type` + `Symbol`) and parse from there
+2. Normalize header names: strip trailing `#` / `$` / spaces; case-insensitive match
+3. Map Bought / Sold / Bought To Open (open) to REAL fills when qty+price are present. Dividend, Qualified Dividend, Option Expired, Exchange Delivered Out / Received In stay non-fill events and must not abort the import
+4. Synthetic fixture only — do **not** commit Kevin’s private CSV or real account numbers/symbols. Import stays FileReader / local-only
+
+**Verification:**
+- `npm test` — preamble fixture finds columns; FAKE1 Bought/Sold/Bought To Open become REAL lots; Dividend / Option Expired / Exchange rows are preserved as non-fills; no “No recognized Activity CSV columns”
+- Local synthetic CSV (Investments tab file picker): preview commits; nothing leaves the browser
+
+---
+
 ### Forecasts tab (scored history)
 **Status:** doing  
 **Request:** The Forecasts tab must list **actual scored forecasts**, not a dead generate-cards page. Second product slice after Investments. Research/paper only — no keys, no trades, not Pooli.

@@ -50,9 +50,26 @@ export function parseOptionalDate(value) {
   return { iso: null, display: text, unparsed: true };
 }
 
+const EXACT_ACTIVITY_TYPES = Object.freeze({
+  bought: 'buy',
+  sold: 'sell',
+  buy: 'buy',
+  sell: 'sell',
+  dividend: 'dividend',
+  'qualified dividend': 'dividend',
+  'bought to open': 'buy',
+  'option expired': 'expired',
+  expired: 'expired',
+  'exchange delivered out': 'exchange',
+  'exchange received in': 'exchange',
+  exchange: 'exchange',
+  fee: 'fee'
+});
+
 export function classifyActivityType(typeText) {
-  const text = String(typeText || '').trim().toLowerCase();
+  const text = String(typeText || '').trim().toLowerCase().replace(/\s+/g, ' ');
   if (!text) return 'unsupported';
+  if (EXACT_ACTIVITY_TYPES[text]) return EXACT_ACTIVITY_TYPES[text];
 
   if (/\b(expir|expired|expiration)\b/.test(text)) return 'expired';
   if (/\b(option|assigned|exercised|assignment|exercise)\b/.test(text)) return 'option';
