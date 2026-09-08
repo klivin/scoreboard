@@ -530,6 +530,8 @@ Save as `synthetic-etrade-activity.csv`, `npm start`, Investments tab → choose
 
 **Shipped:** `parseActivityCsv` stops after a post-data blank gap, two consecutive non-dated non-activity rows, or footer-prose keywords. `Bought To Open` classifies as `option` (not `buy`). Option/expired events never open FIFO share lots. Helper footer: `ETRADE_SYNTHETIC_FOOTER` / `footer: true` on `buildEtradePreambleCsv`.
 
+**Localhost UI (2026-09-08, synthetic CSV only — not Kevin’s E*TRADE file):** Investments preview listed buy / option / sell / dividend / expired / exchange; footer prose was not a row; no unsupported-activity warning. Option Expired price **missing** (not 0). Exchange `--` symbol missing + needs-mapping; Exchange FAKE5 price missing + needs-mapping. After Commit: FAKE1 qty 6, basis $150.00, realized $59.60, dividends $12.50. File stays in the browser.
+
 ---
 
 ### Forecasts tab (scored history)
