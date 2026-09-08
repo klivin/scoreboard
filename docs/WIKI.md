@@ -33,7 +33,7 @@ Scoreboard is a crypto market analysis and forecasting dashboard built with vani
 **Investments (browser-local, not the chart store)** (`public/js/investments/`)
 - `schema.js` - `schemaVersion` + collection namespaces + migrations
 - `store.js` - `localStorage` key `scoreboard.investments` only (never `store/*.json`)
-- `csv.js` / `parse.js` / `validate.js` - Activity CSV parse (header-row scan + `#`/`$` header normalize), preview
+- `csv.js` / `parse.js` / `validate.js` - Activity CSV parse (header-row scan + `#`/`$` header normalize + trailing disclaimer skip), preview
 - `lots.js` - FIFO and average-cost lots, P&L, drawdown (REAL and TRACKING separate)
 - `tracking.js` - paper BUY/SELL + start/stop tracking (always TRACKING)
 - `markers.js` / `export.js` - chart marker payloads + local CSV/JSON export
@@ -900,9 +900,11 @@ scoreboard.investments
 
 **CSV header scan:** E*TRADE Activity files start with a title / account / `Total:` preamble. The parser scans for a row containing `Activity/Trade Date` (or both `Activity Type` and `Symbol`) and reads data from there. Header names are matched case-insensitively after stripping trailing `#` / `$` / spaces (`Quantity #` → Quantity, `Price $` → Price, `Amount $` → Amount).
 
-**Activity types (E*TRADE):** Bought / Sold / Bought To Open → buy/sell fills when qty+price exist. Dividend / Qualified Dividend → dividend (non-fill). Option Expired → expired (non-fill). Exchange Delivered Out / Exchange Received In → exchange (non-fill; explicit map required). Unsupported types are flagged per row and do not abort the import.
+**CSV footer skip:** After the first accepted activity row, parsing stops at a blank gap, at two consecutive non-dated non-activity rows, or at disclaimer prose (`Morgan Stanley`, `Brokerage services are offered`, `Member SIPC`). Trailing legal paragraphs are dropped — they are not unsupported trades.
 
-**Fills:** a buy/sell becomes a lot fill only when **both** quantity and price are present. Missing quantity or price is marked; no fill is inferred. Dividends, fees, exchanges, and options/expired do not invent fills. Exchanges / ticker changes / options require an explicit symbol map.
+**Activity types (E*TRADE):** Bought / Sold → buy/sell fills when qty+price exist. Bought To Open / Sold To Close (and other to-open/to-close) → `option` events, **not** share lots on the underlying symbol. Dividend / Qualified Dividend → dividend (non-fill; missing qty/price stays missing). Option Expired → expired (non-fill; empty price stays missing, never a 0 fill). Exchange Delivered Out / Exchange Received In → exchange (non-fill; explicit map + user cost required). Symbol `--` stays missing — no inference. Unsupported types are flagged per row and do not abort the import.
+
+**Fills:** a buy/sell becomes a lot fill only when **both** quantity and price are present. Missing quantity or price is marked; no fill is inferred. Dividends, fees, exchanges, and options/expired do not invent fills or contracts. Exchanges / ticker changes / options require an explicit symbol map. An option-contract map still does not open FIFO share lots.
 
 **P&L:** FIFO (default) or average-cost. Realized, unrealized, cost basis, return, dividends, drawdown. Missing mark prices stay `missing`, not `0`.
 
@@ -937,7 +939,8 @@ scoreboard.investments
 - FIFO + average-cost lots; paper BUY/SELL; start/stop tracking preserves history
 - Transaction markers on asset charts; local CSV/JSON export
 - Activity CSV: scan for the real header after E*TRADE preamble; normalize `Quantity #` / `Price $` / `Amount $` (**done**, 2026-09-05; synthetic fixture only)
-- Tests: synthetic CSV only (including preamble + `#`/`$` headers). Real brokerage files are not in-repo and were not imported
+- Activity CSV: skip trailing Morgan Stanley / brokerage disclaimer; Bought To Open and Option Expired stay option events (not underlying share lots); Exchange `--` stays needs-mapping; empty option price stays missing (**done**, 2026-09-08; synthetic fixture only)
+- Tests: synthetic CSV only (including preamble + `#`/`$` headers + footer). Real brokerage files are not in-repo and were not imported
 - Localhost UI (synthetic CSV): empty state + privacy warning, preview/Commit, REAL vs TRACKING, paper BUY, start/stop keeps history
 - Chart markers unit-tested; live candle overlay not visually confirmed on this host (no Flow pack)
 - Status: **doing** — first-slice UI/tests passed; screenshot import and broker sync stay open
@@ -1001,6 +1004,6 @@ scoreboard.investments
 
 ---
 
-**Last Updated:** 2026-09-05  
+**Last Updated:** 2026-09-08  
 **Version:** v1.6 (Universe money-scanner)  
 **Status:** Not Pooli. No keys client-side. No trades. Import stays in-browser.

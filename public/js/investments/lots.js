@@ -270,15 +270,21 @@ function computeBucket(events, options = {}) {
       });
       continue;
     }
-    if (event.activityType === 'exchange' || event.activityType === 'option' || event.activityType === 'expired') {
-      if (!event.mapped) {
-        extras.skipped.push({
-          event,
-          reason: 'needs_explicit_mapping',
-          noFillInferred: true
-        });
-        continue;
-      }
+    if (event.activityType === 'option' || event.activityType === 'expired') {
+      extras.skipped.push({
+        event,
+        reason: event.mapped ? 'option_not_share_lot' : 'needs_explicit_mapping',
+        noFillInferred: true
+      });
+      continue;
+    }
+    if (event.activityType === 'exchange') {
+      extras.skipped.push({
+        event,
+        reason: event.mapped ? 'exchange_needs_user_cost' : 'needs_explicit_mapping',
+        noFillInferred: true
+      });
+      continue;
     }
     if (event.flags && event.flags.unsupported) {
       extras.skipped.push({ event, reason: 'unsupported', noFillInferred: true });

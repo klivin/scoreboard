@@ -473,12 +473,12 @@ curl -sS 'http://localhost:3000/api/series?symbol=BTC&interval=1h&sinceCursor=ok
 **Must ship:**
 1. Scan lines for a row containing `Activity/Trade Date` (or `Activity Type` + `Symbol`) and parse from there
 2. Normalize header names: strip trailing `#` / `$` / spaces; case-insensitive match
-3. Map Bought / Sold / Bought To Open (open) to REAL fills when qty+price are present. Dividend, Qualified Dividend, Option Expired, Exchange Delivered Out / Received In stay non-fill events and must not abort the import
+3. Map Bought / Sold to REAL fills when qty+price are present. Bought To Open and Option Expired stay option events (not share lots). Dividend, Qualified Dividend, Exchange Delivered Out / Received In stay non-fill events and must not abort the import
 4. Synthetic fixture only — do **not** commit Kevin’s private CSV or real account numbers/symbols. Import stays FileReader / local-only
 
 **Verification:**
-- `npm test` — 147/147. Preamble fixture finds columns; FAKE1 Bought/Sold/Bought To Open become REAL lots (qty 8, basis $190, realized $59.60); Dividend / Option Expired / Exchange rows are preserved as non-fills; no “No recognized Activity CSV columns”
-- Localhost UI (2026-09-05, synthetic CSV only — not Kevin’s E*TRADE file): Investments tab privacy warning + file picker; preamble + `Quantity #`/`Price $`/`Amount $` preview listed buy/sell/dividend/expired/exchange as REAL; Commit enabled. After commit: FAKE1 qty 8, basis $190, realized $59.60, dividends $12.50. Mapping warnings on expired/exchange only (not abort). File stays in the browser.
+- `npm test` (PR #11): preamble fixture finds columns; FAKE1 Bought/Sold become REAL lots. Follow-up: Bought To Open is an option event and does **not** add share lots (qty 6, basis $150, realized $59.60 from Bought/Sold only). Dividend / Option Expired / Exchange rows stay non-fills; no “No recognized Activity CSV columns”
+- Localhost UI (2026-09-05, synthetic CSV only — not Kevin’s E*TRADE file): Investments tab privacy warning + file picker; preamble + `Quantity #`/`Price $`/`Amount $` preview listed buy/sell/dividend/expired/exchange as REAL; Commit enabled. Mapping warnings on option/expired/exchange only (not abort). File stays in the browser.
 
 **Shipped:** Investments CSV parser scans for the real header; `#`/`$` suffixes normalize to Quantity/Price/Amount. Helper: `buildEtradePreambleCsv` in `public/js/investments/csv.js`.
 
@@ -495,9 +495,35 @@ Activity/Trade Date,Transaction Date,Settlement Date,Activity Type,Description,S
 08/12/2026,08/12/2026,08/14/2026,Bought To Open,SYNTHETIC OPEN FAKE1,FAKE1,SYN-FAKE1,2,20,-40,,Trade,synthetic-bought-to-open
 08/20/2026,08/20/2026,08/22/2026,Sold,SYNTHETIC SELL FAKE1,FAKE1,SYN-FAKE1,4,40,160,,Trade,synthetic-sold
 06/01/2026,06/01/2026,06/01/2026,Qualified Dividend,SYNTHETIC DIVIDEND FAKE1,FAKE1,SYN-FAKE1,,,12.5,,Dividend,synthetic-dividend
-05/01/2026,05/01/2026,05/01/2026,Option Expired,SYNTHETIC OPTION EXPIRED,FAKE3,,1,0,0,,Option,synthetic-option-expired
+05/01/2026,05/01/2026,05/01/2026,Option Expired,SYNTHETIC OPTION EXPIRED,FAKE3,,1,,,Option,synthetic-option-expired
 ```
 Save as `synthetic-etrade-activity.csv`, `npm start`, Investments tab → choose file → preview → Commit. Do not use Kevin’s real export.
+
+---
+
+### E*TRADE footer skip + option events stay off share lots
+**Status:** done  
+**Request:** After PR #11, Buys/Sells are correct. Remaining Activity CSV issues:
+
+1. Skip trailing disclaimer/footer prose. E*TRADE files end with a blank gap then legal paragraphs (Morgan Stanley / “Brokerage services are offered…”). Stop parsing after a blank gap or consecutive non-dated non-activity rows. Do not surface footer lines as unsupported trades.
+2. Option Expired and Bought To Open must **not** become share lots on the underlying symbol. Keep them as option events, or skip them from FIFO share P&L, unless an explicit option-contract mapping exists. Empty option price stays **missing**, never a 0 fill. Do not invent contracts.
+3. Exchange Delivered Out with Symbol `--` stays needs-mapping (no inference). Exchange Received In with a symbol still needs user cost/mapping; do not invent a price. Preserve the raw event.
+4. Cash dividends missing qty/price is correct — leave that.
+
+**Must ship:**
+- Parser stops at footer gap / consecutive non-dated non-activity / Morgan Stanley disclaimer text
+- Bought / Sold still become REAL share lots
+- Bought To Open / Option Expired do not change underlying share qty or cost basis
+- Empty option price is missing, not 0
+- Exchange `--` and Exchange Received In stay needs-mapping / no invented price
+- Dividend missing qty/price remains a non-fill dividend event
+- Synthetic fixture only (FAKE symbols). No private account numbers/tickers. Import stays FileReader / local-only
+
+**Verification:**
+- `npm test` — footer prose is ignored (no unsupported-trade warnings); FAKE1 Bought 10 @ 25 + Sold 4 @ 40 → qty 6, basis $150, realized $59.60; Bought To Open / Option Expired skipped from share lots (even with a symbol map); Option Expired empty price is `null` not 0; Exchange `--` and Exchange Received In stay `needs_explicit_mapping` with price missing; Qualified Dividend stays a dividend with qty/price missing and amount $12.50
+- Do **not** upload or commit Kevin’s private CSV
+
+**Shipped:** `parseActivityCsv` stops after a post-data blank gap, two consecutive non-dated non-activity rows, or footer-prose keywords. `Bought To Open` classifies as `option` (not `buy`). Option/expired events never open FIFO share lots. Helper footer: `ETRADE_SYNTHETIC_FOOTER` / `footer: true` on `buildEtradePreambleCsv`.
 
 ---
 
@@ -779,6 +805,6 @@ Save as `synthetic-etrade-activity.csv`, `npm start`, Investments tab → choose
 
 ---
 
-**Last Updated:** 2026-09-05  
+**Last Updated:** 2026-09-08  
 **Maintainer:** Kevin (reviewer), updated by Scoreboard team  
 **Status Tracking:** This file updated as features ship

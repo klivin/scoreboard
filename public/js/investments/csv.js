@@ -1,3 +1,5 @@
+import { classifyActivityType, parseOptionalDate } from './parse.js';
+
 const CANONICAL_COLUMNS = [
   'Activity/Trade Date',
   'Transaction Date',
@@ -104,6 +106,31 @@ export function findActivityHeaderIndex(lines) {
   return -1;
 }
 
+const FOOTER_PROSE_RE = /morgan stanley|brokerage services are offered|member sipc|securities products are offered/i;
+
+export function isFooterProseText(text) {
+  return FOOTER_PROSE_RE.test(String(text || ''));
+}
+
+export function hasUsableActivityDate(record) {
+  const activityDate = parseOptionalDate(record && record['Activity/Trade Date']);
+  const transactionDate = parseOptionalDate(record && record['Transaction Date']);
+  return Boolean((activityDate && activityDate.iso) || (transactionDate && transactionDate.iso));
+}
+
+export function isRecognizedActivityType(typeText) {
+  return classifyActivityType(typeText) !== 'unsupported';
+}
+
+/**
+ * Trailing E*TRADE disclaimer / legal paragraphs have no trade date and no
+ * recognized activity type. Those must not become unsupported-trade rows.
+ */
+export function isNonDatedNonActivityRecord(record) {
+  if (hasUsableActivityDate(record)) return false;
+  return !isRecognizedActivityType(record && record['Activity Type']);
+}
+
 export function parseActivityCsv(text) {
   const lines = splitCsvLines(text);
   const nonEmpty = lines.filter((line) => line.trim() !== '');
@@ -137,8 +164,28 @@ export function parseActivityCsv(text) {
   }
 
   const rows = [];
+  const pendingNonActivity = [];
+  let acceptedActivity = false;
+  let stoppedAtFooter = false;
+
+  const flushPending = () => {
+    for (const pending of pendingNonActivity) rows.push(pending);
+    pendingNonActivity.length = 0;
+  };
+
   for (let i = headerIndex + 1; i < lines.length; i += 1) {
-    if (lines[i].trim() === '') continue;
+    if (lines[i].trim() === '') {
+      if (acceptedActivity) {
+        stoppedAtFooter = true;
+        break;
+      }
+      continue;
+    }
+    if (isFooterProseText(lines[i])) {
+      stoppedAtFooter = true;
+      break;
+    }
+
     const cells = parseCsvLine(lines[i]);
     const raw = {};
     const record = {};
@@ -148,19 +195,36 @@ export function parseActivityCsv(text) {
       const canonical = canonicalHeaders[idx];
       if (canonical) record[canonical] = value;
     });
-    rows.push({
+    const row = {
       lineNumber: i + 1,
       raw,
       record
-    });
+    };
+
+    if (isNonDatedNonActivityRecord(record)) {
+      pendingNonActivity.push(row);
+      if (acceptedActivity && pendingNonActivity.length >= 2) {
+        pendingNonActivity.length = 0;
+        stoppedAtFooter = true;
+        break;
+      }
+      continue;
+    }
+
+    flushPending();
+    rows.push(row);
+    acceptedActivity = true;
   }
+
+  if (!acceptedActivity) flushPending();
 
   return {
     headers: rawHeaders,
     canonicalHeaders,
     rows,
     errors,
-    headerLineNumber: headerIndex + 1
+    headerLineNumber: headerIndex + 1,
+    stoppedAtFooter
   };
 }
 
@@ -202,6 +266,11 @@ export function buildSyntheticCsv(rows, headers = CANONICAL_COLUMNS) {
   return lines.join('\n');
 }
 
+export const ETRADE_SYNTHETIC_FOOTER = [
+  'Brokerage services are offered by Morgan Stanley Smith Barney LLC, Member SIPC.',
+  '© 2026 Morgan Stanley Smith Barney LLC. Member SIPC.'
+];
+
 /**
  * Synthetic E*TRADE Activity export shape: title / account / Total: preamble,
  * then a header with Quantity # / Price $ / Amount $ suffixes.
@@ -213,7 +282,7 @@ export function buildEtradePreambleCsv(rows, options = {}) {
   const to = options.to || '2026-09-03';
   const total = options.total == null ? '20519.86' : options.total;
   const body = buildSyntheticCsv(rows, options.headers || ETRADE_EXPORT_COLUMNS);
-  return [
+  const parts = [
     'Investment Transactions Activity Types',
     '',
     `Account Activity for ${accountLabel} from ${from} to ${to}`,
@@ -221,5 +290,11 @@ export function buildEtradePreambleCsv(rows, options = {}) {
     `Total:,${total}`,
     '',
     body
-  ].join('\n');
+  ];
+  if (options.footer) {
+    const footerLines = Array.isArray(options.footer) ? options.footer : ETRADE_SYNTHETIC_FOOTER;
+    if (options.footerGap !== false) parts.push('');
+    parts.push(...footerLines);
+  }
+  return parts.join('\n');
 }
