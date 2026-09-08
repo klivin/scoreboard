@@ -496,8 +496,12 @@ Activity/Trade Date,Transaction Date,Settlement Date,Activity Type,Description,S
 08/20/2026,08/20/2026,08/22/2026,Sold,SYNTHETIC SELL FAKE1,FAKE1,SYN-FAKE1,4,40,160,,Trade,synthetic-sold
 06/01/2026,06/01/2026,06/01/2026,Qualified Dividend,SYNTHETIC DIVIDEND FAKE1,FAKE1,SYN-FAKE1,,,12.5,,Dividend,synthetic-dividend
 05/01/2026,05/01/2026,05/01/2026,Option Expired,SYNTHETIC OPTION EXPIRED,FAKE3,,1,,,Option,synthetic-option-expired
+04/01/2026,04/01/2026,04/01/2026,Exchange Delivered Out,SYNTHETIC EXCHANGE OUT NO SYMBOL,--,,,3,,,Exchange,synthetic-exchange-out-dash
+04/01/2026,04/01/2026,04/01/2026,Exchange Received In,SYNTHETIC EXCHANGE IN,FAKE5,SYN-FAKE5,3,,,Exchange,synthetic-exchange-in
+
+Brokerage services are offered by Morgan Stanley Smith Barney LLC, Member SIPC.
 ```
-Save as `synthetic-etrade-activity.csv`, `npm start`, Investments tab → choose file → preview → Commit. Do not use Kevin’s real export.
+Save as `synthetic-etrade-activity.csv`, `npm start`, Investments tab → choose file → preview → Commit. Do not use Kevin’s real export. Expected after Commit: FAKE1 qty 6, basis $150, realized $59.60, dividends $12.50. Footer prose is not a row. Bought To Open / Option Expired do not change FAKE1 lots. Exchange `--` stays needs-mapping.
 
 ---
 
@@ -520,7 +524,7 @@ Save as `synthetic-etrade-activity.csv`, `npm start`, Investments tab → choose
 - Synthetic fixture only (FAKE symbols). No private account numbers/tickers. Import stays FileReader / local-only
 
 **Verification:**
-- `npm test` — footer prose is ignored (no unsupported-trade warnings); FAKE1 Bought 10 @ 25 + Sold 4 @ 40 → qty 6, basis $150, realized $59.60; Bought To Open / Option Expired skipped from share lots (even with a symbol map); Option Expired empty price is `null` not 0; Exchange `--` and Exchange Received In stay `needs_explicit_mapping` with price missing; Qualified Dividend stays a dividend with qty/price missing and amount $12.50
+- `npm test` — 151/151. Footer prose is ignored (no unsupported-trade warnings); FAKE1 Bought 10 @ 25 + Sold 4 @ 40 → qty 6, basis $150, realized $59.60; Bought To Open / Option Expired skipped from share lots (even with a symbol map); Option Expired empty price is `null` not 0; Exchange `--` and Exchange Received In stay `needs_explicit_mapping` with price missing; Qualified Dividend stays a dividend with qty/price missing and amount $12.50
 - Do **not** upload or commit Kevin’s private CSV
 
 **Shipped:** `parseActivityCsv` stops after a post-data blank gap, two consecutive non-dated non-activity rows, or footer-prose keywords. `Bought To Open` classifies as `option` (not `buy`). Option/expired events never open FIFO share lots. Helper footer: `ETRADE_SYNTHETIC_FOOTER` / `footer: true` on `buildEtradePreambleCsv`.
