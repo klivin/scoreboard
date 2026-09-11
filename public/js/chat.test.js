@@ -9,7 +9,7 @@ import {
   normalizeChatSettings
 } from './chat/schema.js';
 import { ChatStore, MemoryStorage } from './chat/store.js';
-import { buildChatPaneHtml, NFA_BANNER_TEXT, providerNoteText } from './chat/view.js';
+import { buildChatPaneHtml, providerNoteText } from './chat/view.js';
 import { ChatController, cardFromDataset, postChat } from './chat/controller.js';
 import { loadPayloadFromCard, normalizeLoadPayload, applyLoadAssetToDom } from './load-asset.js';
 
@@ -59,10 +59,11 @@ test('ChatStore persists after migrate', () => {
   assert.strictEqual(again.listMessages().length, 2);
 });
 
-test('NFA banner is always in the chat pane chrome', () => {
+test('Chat pane chrome has no NFA banner or disclaimer spam', () => {
   const html = buildChatPaneHtml({ messages: [], provider: 'stub' });
-  assert.match(html, /chat-nfa-banner/);
-  assert.ok(html.includes(NFA_BANNER_TEXT));
+  assert.doesNotMatch(html, /chat-nfa-banner/);
+  assert.doesNotMatch(html, /not financial advice/i);
+  assert.doesNotMatch(html, /\bNFA\b/);
   assert.match(html, /chat-provider-select/);
   assert.match(html, /chat-model-select/);
   const withMsgs = buildChatPaneHtml({
@@ -74,8 +75,9 @@ test('NFA banner is always in the chat pane chrome', () => {
     model: 'grok-4.6',
     hasLiveLlm: true
   });
-  assert.match(withMsgs, /chat-nfa-banner/);
-  assert.ok(withMsgs.includes(NFA_BANNER_TEXT));
+  assert.doesNotMatch(withMsgs, /chat-nfa-banner/);
+  assert.doesNotMatch(withMsgs, /not financial advice/i);
+  assert.doesNotMatch(withMsgs, /\bNFA\b/);
   assert.match(withMsgs, /Live function-calling provider: xai · grok-4\.6/);
 });
 

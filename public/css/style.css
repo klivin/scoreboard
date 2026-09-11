@@ -866,16 +866,6 @@ button:hover {
   min-height: 560px;
 }
 
-.chat-nfa-banner {
-  background: #fff7ed;
-  border: 2px solid #f59e0b;
-  border-radius: 8px;
-  padding: 14px 16px;
-  color: #9a3412;
-  line-height: 1.5;
-  font-weight: 600;
-}
-
 .chat-toolbar {
   display: flex;
   justify-content: space-between;

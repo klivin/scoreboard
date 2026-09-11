@@ -1,5 +1,5 @@
 import { defaultCatalog, findCatalogMentions } from './catalog.js';
-import { cardsFromResolved, flattenContent, NFA_DISCLAIMER } from './blocks.js';
+import { cardsFromResolved, flattenContent } from './blocks.js';
 
 function lastUserText(messages) {
   for (let i = messages.length - 1; i >= 0; i -= 1) {
@@ -66,18 +66,17 @@ function stubSummary(userText, results) {
   if (/\b(buyback|buybacks|burn|burns)\b/.test(lower) && ok.length) {
     return [
       `Five catalog names often discussed for token burns / buybacks: ${ok.map((row) => row.symbol).join(', ')}.`,
-      'This is a static research list, not a live on-chain scan.',
-      NFA_DISCLAIMER
+      'This is a static research list, not a live on-chain scan.'
     ].join(' ');
   }
   if (/\bcompare\b/i.test(userText) && ok.length >= 2) {
-    return `Side-by-side research notes for ${ok.map((row) => row.symbol).join(' vs ')}. Tap a card to load that asset on Overview (daily/hourly via Load Data). ${NFA_DISCLAIMER}`;
+    return `Side-by-side research notes for ${ok.map((row) => row.symbol).join(' vs ')}. Tap a card to load that asset on Overview (daily/hourly via Load Data).`;
   }
   if (/^\s*load\s+/i.test(userText) && ok.length) {
-    return `Resolved ${ok.map((row) => row.symbol).join(', ')}. Tap the card to load the Scoreboard chart. ${NFA_DISCLAIMER}`;
+    return `Resolved ${ok.map((row) => row.symbol).join(', ')}. Tap the card to load the Scoreboard chart.`;
   }
   if (ok.length) {
-    return `Research-only notes for ${ok.map((row) => row.symbol).join(', ')}. ${NFA_DISCLAIMER}`;
+    return `Research notes for ${ok.map((row) => row.symbol).join(', ')}.`;
   }
   return null;
 }
@@ -137,8 +136,7 @@ export function createStubProvider({ catalog } = {}) {
           type: 'text',
           markdown: [
             'I can research catalog assets (crypto, a few equities/ETFs) and attach tappable cards after tools resolve them.',
-            'Examples: “what are 5 crypto coins that are doing buybacks”, “load SKR”, “compare MSTR vs BTC”.',
-            NFA_DISCLAIMER
+            'Examples: “what are 5 crypto coins that are doing buybacks”, “load SKR”, “compare MSTR vs BTC”.'
           ].join(' ')
         }]
       };

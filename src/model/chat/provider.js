@@ -103,6 +103,22 @@ export function detectChatProvider(env = process.env, override = {}) {
   };
 }
 
+export function isGpt56Family(model) {
+  const id = String(model || '').trim().toLowerCase();
+  return id === 'gpt-5.6' || id.startsWith('gpt-5.6-');
+}
+
+/**
+ * GPT-5.6* defaults reasoning_effort to medium on /v1/chat/completions and
+ * rejects function tools there. OpenAI's documented fix is /v1/responses
+ * (tools + reasoning) or reasoning_effort: 'none' on chat/completions.
+ * Scoreboard uses Responses for OpenAI GPT-5.6 so the existing tool loop
+ * still works. xAI Grok and other OpenAI models stay on chat/completions.
+ */
+export function usesOpenAiResponsesApi(config = {}) {
+  return config.id === 'openai' && isGpt56Family(config.model);
+}
+
 function toOpenAiMessages(messages) {
   const out = [{ role: 'system', content: SYSTEM_PROMPT }];
   for (const msg of messages || []) {
@@ -141,6 +157,55 @@ function toOpenAiMessages(messages) {
   return out;
 }
 
+export function toResponsesTools(toolDefs) {
+  return (toolDefs || []).map((def) => {
+    if (def && def.type === 'function' && def.function) {
+      return {
+        type: 'function',
+        name: def.function.name,
+        description: def.function.description,
+        parameters: def.function.parameters
+      };
+    }
+    return def;
+  });
+}
+
+export function toResponsesInput(messages) {
+  const input = [];
+  for (const msg of messages || []) {
+    if (!msg) continue;
+    if (msg.role === 'user') {
+      input.push({ role: 'user', content: flattenContent(msg.content) });
+      continue;
+    }
+    if (msg.role === 'assistant' && msg.toolCalls) {
+      for (const call of msg.toolCalls) {
+        input.push({
+          type: 'function_call',
+          call_id: call.id,
+          name: call.name,
+          arguments: JSON.stringify(call.args || {})
+        });
+      }
+      continue;
+    }
+    if (msg.role === 'assistant') {
+      const text = flattenContent(msg.content);
+      if (text) input.push({ role: 'assistant', content: text });
+      continue;
+    }
+    if (msg.role === 'tool') {
+      input.push({
+        type: 'function_call_output',
+        call_id: msg.toolCallId || msg.id || 'tool',
+        output: typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.result || {})
+      });
+    }
+  }
+  return input;
+}
+
 function parseToolArgs(raw) {
   if (raw && typeof raw === 'object') return raw;
   if (typeof raw !== 'string' || !raw.trim()) return {};
@@ -151,54 +216,128 @@ function parseToolArgs(raw) {
   }
 }
 
+function parseProviderError(response, body, text) {
+  const err = (body && (body.error && body.error.message)) || text || `HTTP ${response.status}`;
+  return new Error(`Chat provider error: ${err}`);
+}
+
+function parseChatCompletionsBody(body) {
+  const message = body && body.choices && body.choices[0] && body.choices[0].message;
+  if (!message) {
+    return { content: [{ type: 'text', markdown: 'Empty model response.' }] };
+  }
+  if (Array.isArray(message.tool_calls) && message.tool_calls.length) {
+    return {
+      toolCalls: message.tool_calls.map((call) => ({
+        id: call.id,
+        name: call.function && call.function.name,
+        args: parseToolArgs(call.function && call.function.arguments)
+      }))
+    };
+  }
+  return { content: parseModelContent(message.content) };
+}
+
+export function parseResponsesBody(body) {
+  const output = (body && Array.isArray(body.output)) ? body.output : [];
+  const toolCalls = [];
+  const textParts = [];
+  for (const item of output) {
+    if (!item) continue;
+    if (item.type === 'function_call') {
+      toolCalls.push({
+        id: item.call_id || item.id,
+        name: item.name,
+        args: parseToolArgs(item.arguments)
+      });
+      continue;
+    }
+    if (item.type === 'message' && Array.isArray(item.content)) {
+      for (const part of item.content) {
+        const text = part && (part.text || part.markdown);
+        if (text && (part.type === 'output_text' || part.type === 'text')) {
+          textParts.push(text);
+        }
+      }
+    }
+  }
+  if (toolCalls.length) return { toolCalls };
+  if (body && typeof body.output_text === 'string' && body.output_text.trim()) {
+    return { content: parseModelContent(body.output_text) };
+  }
+  if (textParts.length) {
+    return { content: parseModelContent(textParts.join('\n\n')) };
+  }
+  return { content: [{ type: 'text', markdown: 'Empty model response.' }] };
+}
+
+function buildProviderRequest(config, messages, toolDefs) {
+  if (usesOpenAiResponsesApi(config)) {
+    return {
+      url: `${config.baseUrl}/responses`,
+      body: {
+        model: config.model,
+        instructions: SYSTEM_PROMPT,
+        input: toResponsesInput(messages),
+        tools: toResponsesTools(toolDefs),
+        tool_choice: 'auto',
+        store: false
+      }
+    };
+  }
+  const body = {
+    model: config.model,
+    temperature: 0.2,
+    messages: toOpenAiMessages(messages),
+    tools: toolDefs,
+    tool_choice: 'auto'
+  };
+  // Defensive: if a GPT-5.6 id is ever sent on chat/completions (custom
+  // base URL, mis-detect), omit the default medium reasoning_effort so
+  // function tools are not rejected.
+  if (isGpt56Family(config.model)) {
+    body.reasoning_effort = 'none';
+    delete body.temperature;
+  }
+  return {
+    url: `${config.baseUrl}/chat/completions`,
+    body
+  };
+}
+
 export function createOpenAiCompatibleProvider(config, { fetchImpl } = {}) {
   const fetchFn = fetchImpl || globalThis.fetch;
+  const useResponses = usesOpenAiResponsesApi(config);
   return {
     id: config.id,
     model: config.model || null,
+    api: useResponses ? 'responses' : 'chat_completions',
     async complete(messages, toolDefs) {
       if (typeof fetchFn !== 'function') {
         throw new Error('fetch is not available for the chat provider');
       }
-      const response = await fetchFn(`${config.baseUrl}/chat/completions`, {
+      const request = buildProviderRequest(config, messages, toolDefs);
+      const response = await fetchFn(request.url, {
         method: 'POST',
         headers: {
           Authorization: `Bearer ${config.apiKey}`,
           'Content-Type': 'application/json'
         },
-        body: JSON.stringify({
-          model: config.model,
-          temperature: 0.2,
-          messages: toOpenAiMessages(messages),
-          tools: toolDefs,
-          tool_choice: 'auto'
-        })
+        body: JSON.stringify(request.body)
       });
       const text = await response.text();
-      let body = null;
+      let parsed = null;
       try {
-        body = JSON.parse(text);
+        parsed = JSON.parse(text);
       } catch {
-        body = null;
+        parsed = null;
       }
       if (!response.ok) {
-        const err = (body && (body.error && body.error.message)) || text || `HTTP ${response.status}`;
-        throw new Error(`Chat provider error: ${err}`);
+        throw parseProviderError(response, parsed, text);
       }
-      const message = body && body.choices && body.choices[0] && body.choices[0].message;
-      if (!message) {
-        return { content: [{ type: 'text', markdown: 'Empty model response.' }] };
-      }
-      if (Array.isArray(message.tool_calls) && message.tool_calls.length) {
-        return {
-          toolCalls: message.tool_calls.map((call) => ({
-            id: call.id,
-            name: call.function && call.function.name,
-            args: parseToolArgs(call.function && call.function.arguments)
-          }))
-        };
-      }
-      return { content: parseModelContent(message.content) };
+      return useResponses
+        ? parseResponsesBody(parsed)
+        : parseChatCompletionsBody(parsed);
     }
   };
 }

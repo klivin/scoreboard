@@ -9,9 +9,15 @@ import { createChatProvider } from './provider.js';
 import {
   detectChatProvider,
   sanitizeChatOverride,
+  isGpt56Family,
+  usesOpenAiResponsesApi,
+  toResponsesTools,
+  toResponsesInput,
+  parseResponsesBody,
   DEFAULT_XAI_MODEL,
   DEFAULT_OPENAI_MODEL
 } from './provider.js';
+import { SYSTEM_PROMPT } from './prompt.js';
 
 const catalog = defaultCatalog();
 
@@ -255,9 +261,199 @@ test('live provider posts OpenAI-compatible tools to the selected model', async 
     }
   });
   assert.strictEqual(provider.id, 'xai');
+  assert.strictEqual(provider.api, 'chat_completions');
   await provider.complete([{ role: 'user', content: 'hello' }], [{ type: 'function', function: { name: 'resolve_assets' } }]);
   assert.strictEqual(calls[0].url, 'https://api.x.ai/v1/chat/completions');
   assert.strictEqual(calls[0].body.model, 'grok-4.6');
   assert.strictEqual(calls[0].body.tool_choice, 'auto');
   assert.ok(Array.isArray(calls[0].body.tools));
+  assert.ok(!Object.prototype.hasOwnProperty.call(calls[0].body, 'reasoning_effort'));
+});
+
+test('isGpt56Family covers Sol/Terra/Luna and the gpt-5.6 alias', () => {
+  assert.strictEqual(isGpt56Family('gpt-5.6-sol'), true);
+  assert.strictEqual(isGpt56Family('gpt-5.6'), true);
+  assert.strictEqual(isGpt56Family('gpt-5.6-terra'), true);
+  assert.strictEqual(isGpt56Family('gpt-5.6-luna'), true);
+  assert.strictEqual(isGpt56Family('gpt-5.6-sol-2026-02-16'), true);
+  assert.strictEqual(isGpt56Family('gpt-4o-mini'), false);
+  assert.strictEqual(isGpt56Family('grok-4.6'), false);
+  assert.strictEqual(usesOpenAiResponsesApi({ id: 'openai', model: 'gpt-5.6-sol' }), true);
+  assert.strictEqual(usesOpenAiResponsesApi({ id: 'openai', model: 'gpt-4o-mini' }), false);
+  assert.strictEqual(usesOpenAiResponsesApi({ id: 'xai', model: 'gpt-5.6-sol' }), false);
+});
+
+test('OpenAI GPT-5.6 family posts function tools to /v1/responses', async () => {
+  for (const model of ['gpt-5.6-sol', 'gpt-5.6', 'gpt-5.6-terra', 'gpt-5.6-luna']) {
+    const calls = [];
+    const tools = [{
+      type: 'function',
+      function: { name: 'resolve_assets', description: 'Resolve', parameters: { type: 'object' } }
+    }];
+    const provider = createChatProvider({
+      env: { SCOREBOARD_OPENAI_API_KEY: 'test-openai' },
+      override: { provider: 'openai', model },
+      fetchImpl: async (url, opts) => {
+        calls.push({ url, body: JSON.parse(opts.body) });
+        return {
+          ok: true,
+          text: async () => JSON.stringify({
+            output: [{
+              type: 'message',
+              content: [{ type: 'output_text', text: '{"content":[{"type":"text","markdown":"ok"}]}' }]
+            }]
+          })
+        };
+      }
+    });
+    assert.strictEqual(provider.id, 'openai');
+    assert.strictEqual(provider.api, 'responses');
+    const result = await provider.complete([{ role: 'user', content: 'hello' }], tools);
+    assert.strictEqual(calls[0].url, 'https://api.openai.com/v1/responses');
+    assert.strictEqual(calls[0].body.model, model);
+    assert.strictEqual(calls[0].body.tool_choice, 'auto');
+    assert.strictEqual(calls[0].body.instructions, SYSTEM_PROMPT);
+    assert.strictEqual(calls[0].body.store, false);
+    assert.ok(!Object.prototype.hasOwnProperty.call(calls[0].body, 'temperature'));
+    assert.ok(!Object.prototype.hasOwnProperty.call(calls[0].body, 'reasoning_effort'));
+    assert.deepStrictEqual(calls[0].body.tools, [{
+      type: 'function',
+      name: 'resolve_assets',
+      description: 'Resolve',
+      parameters: { type: 'object' }
+    }]);
+    assert.deepStrictEqual(calls[0].body.input[0], { role: 'user', content: 'hello' });
+    assert.strictEqual(result.content[0].markdown.includes('ok') || result.content[0].type === 'text', true);
+  }
+});
+
+test('OpenAI gpt-4o-mini stays on chat/completions', async () => {
+  const calls = [];
+  const provider = createChatProvider({
+    env: { SCOREBOARD_OPENAI_API_KEY: 'test-openai' },
+    override: { provider: 'openai', model: 'gpt-4o-mini' },
+    fetchImpl: async (url, opts) => {
+      calls.push({ url, body: JSON.parse(opts.body) });
+      return {
+        ok: true,
+        text: async () => JSON.stringify({
+          choices: [{ message: { content: '{"content":[{"type":"text","markdown":"ok"}]}' } }]
+        })
+      };
+    }
+  });
+  assert.strictEqual(provider.api, 'chat_completions');
+  await provider.complete([{ role: 'user', content: 'hello' }], [{ type: 'function', function: { name: 'resolve_assets' } }]);
+  assert.strictEqual(calls[0].url, 'https://api.openai.com/v1/chat/completions');
+  assert.strictEqual(calls[0].body.temperature, 0.2);
+  assert.ok(!Object.prototype.hasOwnProperty.call(calls[0].body, 'reasoning_effort'));
+});
+
+test('Responses adapter maps tool_calls into the existing loop shape', async () => {
+  const calls = [];
+  const provider = createChatProvider({
+    env: { SCOREBOARD_OPENAI_API_KEY: 'test-openai' },
+    override: { provider: 'openai', model: 'gpt-5.6-sol' },
+    fetchImpl: async (url, opts) => {
+      const body = JSON.parse(opts.body);
+      calls.push({ url, body });
+      const hasToolOutput = (body.input || []).some((item) => item.type === 'function_call_output');
+      if (!hasToolOutput) {
+        return {
+          ok: true,
+          text: async () => JSON.stringify({
+            output: [{
+              type: 'function_call',
+              id: 'fc_1',
+              call_id: 'call_skr',
+              name: 'resolve_assets',
+              arguments: '{"queries":["SKR"]}'
+            }]
+          })
+        };
+      }
+      return {
+        ok: true,
+        text: async () => JSON.stringify({
+          output: [{
+            type: 'message',
+            content: [{
+              type: 'output_text',
+              text: JSON.stringify({
+                content: [
+                  { type: 'text', markdown: 'Resolved SKR.' },
+                  {
+                    type: 'asset_card',
+                    symbol: 'SKR',
+                    name: 'SKR',
+                    assetClass: 'crypto',
+                    scoreboardId: 'crypto:SKR',
+                    load: { symbol: 'SKR', assetClass: 'crypto', intervalHint: '1d' }
+                  }
+                ]
+              })
+            }]
+          })
+        })
+      };
+    }
+  });
+  const result = await runChatTurn({
+    messages: [{ role: 'user', content: 'load SKR' }],
+    provider,
+    tools: createToolRunner({ catalog })
+  });
+  assert.strictEqual(calls[0].url, 'https://api.openai.com/v1/responses');
+  assert.ok(calls[1].body.input.some((item) => item.type === 'function_call' && item.name === 'resolve_assets'));
+  assert.ok(calls[1].body.input.some((item) => item.type === 'function_call_output' && item.call_id === 'call_skr'));
+  const cards = result.content.filter((block) => block.type === 'asset_card');
+  assert.strictEqual(cards.length, 1);
+  assert.strictEqual(cards[0].symbol, 'SKR');
+  assert.ok(result.toolTrace.some((row) => row.name === 'resolve_assets'));
+  assert.ok(!Object.prototype.hasOwnProperty.call(result, 'disclaimer'));
+});
+
+test('toResponsesTools / toResponsesInput / parseResponsesBody stay DRY', () => {
+  assert.deepStrictEqual(toResponsesTools([{
+    type: 'function',
+    function: { name: 'search_assets', description: 'Search', parameters: { type: 'object' } }
+  }]), [{
+    type: 'function',
+    name: 'search_assets',
+    description: 'Search',
+    parameters: { type: 'object' }
+  }]);
+  const input = toResponsesInput([
+    { role: 'user', content: 'load SKR' },
+    { role: 'assistant', content: null, toolCalls: [{ id: 'call_1', name: 'resolve_assets', args: { queries: ['SKR'] } }] },
+    { role: 'tool', toolCallId: 'call_1', content: '{"ok":true}' }
+  ]);
+  assert.deepStrictEqual(input, [
+    { role: 'user', content: 'load SKR' },
+    { type: 'function_call', call_id: 'call_1', name: 'resolve_assets', arguments: '{"queries":["SKR"]}' },
+    { type: 'function_call_output', call_id: 'call_1', output: '{"ok":true}' }
+  ]);
+  const parsed = parseResponsesBody({
+    output: [{ type: 'function_call', call_id: 'c1', name: 'resolve_assets', arguments: '{"queries":["BTC"]}' }]
+  });
+  assert.deepStrictEqual(parsed.toolCalls, [{ id: 'c1', name: 'resolve_assets', args: { queries: ['BTC'] } }]);
+});
+
+test('stub and live replies do not append NFA disclaimer spam', async () => {
+  const result = await runChatTurn({
+    messages: [{ role: 'user', content: 'load SKR' }],
+    provider: createStubProvider({ catalog }),
+    tools: createToolRunner({ catalog })
+  });
+  const text = result.content.map((block) => block.markdown || '').join(' ');
+  assert.doesNotMatch(text, /not financial advice/i);
+  assert.doesNotMatch(text, /\bNFA\b/);
+  assert.ok(!Object.prototype.hasOwnProperty.call(result, 'disclaimer'));
+  const status = chatStatus({});
+  assert.ok(!Object.prototype.hasOwnProperty.call(status, 'disclaimer'));
+  assert.doesNotMatch(SYSTEM_PROMPT, /not financial advice/i);
+  assert.doesNotMatch(SYSTEM_PROMPT, /\bNFA\b/);
+  const empty = await createStubProvider({ catalog }).complete([{ role: 'user', content: 'how does the naive baseline work?' }]);
+  assert.doesNotMatch(empty.content[0].markdown, /not financial advice/i);
+  assert.doesNotMatch(empty.content[0].markdown, /\bNFA\b/);
 });

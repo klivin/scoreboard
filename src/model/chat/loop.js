@@ -1,4 +1,4 @@
-import { sanitizeAssistantContent, NFA_DISCLAIMER } from './blocks.js';
+import { sanitizeAssistantContent } from './blocks.js';
 import { createToolRunner } from './tools.js';
 import {
   availableChatProviders,
@@ -69,8 +69,7 @@ export async function runChatTurn({
         toolTrace,
         resolved,
         provider: used.id,
-        model: used.model || null,
-        disclaimer: NFA_DISCLAIMER
+        model: used.model || null
       };
     }
   } catch (error) {
@@ -78,7 +77,7 @@ export async function runChatTurn({
       ? sanitizeAssistantContent([], resolved)
       : [{
         type: 'text',
-        markdown: `${error.message || 'Chat provider failed'}. ${NFA_DISCLAIMER}`
+        markdown: error.message || 'Chat provider failed.'
       }];
     return {
       content: fallback,
@@ -86,7 +85,6 @@ export async function runChatTurn({
       resolved,
       provider: used.id,
       model: used.model || null,
-      disclaimer: NFA_DISCLAIMER,
       error: error.message
     };
   }
@@ -94,13 +92,12 @@ export async function runChatTurn({
   return {
     content: [{
       type: 'text',
-      markdown: `Tool loop stopped before a final answer. ${NFA_DISCLAIMER}`
+      markdown: 'Tool loop stopped before a final answer.'
     }],
     toolTrace,
     resolved,
     provider: used.id,
-    model: used.model || null,
-    disclaimer: NFA_DISCLAIMER
+    model: used.model || null
   };
 }
 
@@ -112,7 +109,6 @@ export function chatStatus(env = process.env, override = {}) {
     provider: detected.id,
     hasLiveLlm: detected.id !== 'stub',
     model: detected.model || null,
-    disclaimer: NFA_DISCLAIMER,
     envDefault: {
       provider: envDefault.id,
       model: envDefault.model || null

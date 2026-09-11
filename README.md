@@ -14,7 +14,7 @@ Crypto market analysis and forecasting dashboard built with vanilla JavaScript M
   - Moving Averages (MA20 EMA, MA50/100/200 SMA)
   - Ichimoku Cloud (Tenkan, Kijun, Senkou A/B, Chikou)
   - Volume overlays
-- **Research Chat**: Tool-loop pane (resolve/search/chart-context). Tappable asset cards load Overview. NFA. Default live model is xAI `grok-4.6`; OpenAI is selectable. Server-side key via gitignored `.env`; otherwise a local stub.
+- **Research Chat**: Tool-loop pane (resolve/search/chart-context). Tappable asset cards load Overview. Default live model is xAI `grok-4.6`; OpenAI is selectable (GPT-5.6 family uses `/v1/responses` for tools). Server-side key via gitignored `.env`; otherwise a local stub.
 - **Data Management**: 
   - Local JSON store (Firestore-compatible schema)
   - CSV/JSON data ingestion
