@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert';
-import { SeriesModel, filterRowsBySymbol, mapIndicatorRow, normalizeCandleRow, missingSeriesMessage } from './series.js';
+import { SeriesModel, filterRowsBySymbol, mapIndicatorRow, normalizeCandleRow, missingSeriesMessage, mergeDailyPreferLive, calendarDateKey } from './series.js';
 import { parseCSV } from './ingest.js';
 import { formatUtcTick } from './dates.js';
 
@@ -247,4 +247,130 @@ test('ETH series does not inherit BTC open interest', () => {
   model.replaceData(pack);
   const eth = model.getSeries('ETH', '1d');
   assert.ok(eth.every((row) => row.oi == null));
+});
+
+test('daily series prefers fresher ingest candles over older pack indicators', () => {
+  const model = new SeriesModel();
+  const pack = makePack();
+  pack.candles_1d = {
+    data: [
+      {
+        ts_ms: Date.parse('2026-08-10T16:00:00Z'),
+        datetime_utc: '2026-08-10 16:00:00',
+        date_utc: '2026-08-10',
+        symbol: 'BTC',
+        open: 65000,
+        high: 66000,
+        low: 64000,
+        close: 65555,
+        volume: 12
+      },
+      {
+        ts_ms: Date.parse('2026-09-10T16:00:00Z'),
+        datetime_utc: '2026-09-10 16:00:00',
+        date_utc: '2026-09-10',
+        symbol: 'BTC',
+        open: 80000,
+        high: 81000,
+        low: 79000,
+        close: 80500,
+        volume: 15
+      }
+    ],
+    missing: false,
+    filename: 'okx_btc_usdt_swap_candles_1d.csv'
+  };
+  model.replaceData(pack);
+
+  const btc = model.getSeries('BTC', '1d');
+  const last = btc[btc.length - 1];
+  assert.strictEqual(calendarDateKey(last), '2026-09-10');
+  assert.strictEqual(last.close, 80500);
+  const aug10 = btc.find((row) => calendarDateKey(row) === '2026-08-10');
+  assert.ok(aug10);
+  assert.strictEqual(aug10.close, 65555);
+  assert.ok(btc.some((row) => calendarDateKey(row) === '2026-08-01'), 'older pack-only days stay');
+  const dates = btc.map(calendarDateKey);
+  assert.ok(!dates.includes('2026-08-20'), 'gaps stay gaps — no invented Aug 20 bar');
+});
+
+test('ETH daily prefers live okx-candles ingest and never BTC candles', () => {
+  const model = new SeriesModel();
+  const pack = makePack();
+  pack.candles_1d = {
+    data: [{
+      ts_ms: Date.parse('2026-09-10T16:00:00Z'),
+      datetime_utc: '2026-09-10 16:00:00',
+      date_utc: '2026-09-10',
+      close: 80500
+    }],
+    missing: false
+  };
+  pack.live_candles = [
+    {
+      source: 'okx-candles',
+      symbol: 'ETH',
+      interval: '1d',
+      timestamp: Date.parse('2026-09-10T16:00:00Z'),
+      datetime_utc: '2026-09-10 16:00:00',
+      date_utc: '2026-09-10',
+      open: 4300,
+      high: 4400,
+      low: 4200,
+      close: 4350,
+      volume: 9
+    }
+  ];
+  model.replaceData(pack);
+
+  const eth = model.getSeries('ETH', '1d');
+  const last = eth[eth.length - 1];
+  assert.strictEqual(calendarDateKey(last), '2026-09-10');
+  assert.strictEqual(last.close, 4350);
+  assert.ok(last.close < 10000);
+  assert.ok(eth.some((row) => calendarDateKey(row) === '2026-08-01'));
+});
+
+test('ETH 1h uses live ingest candles and still does not interpolate daily', () => {
+  const model = new SeriesModel();
+  const pack = makePack();
+  pack.live_candles = [
+    {
+      source: 'okx-candles',
+      symbol: 'ETH',
+      interval: '1h',
+      timestamp: Date.parse('2026-09-11T12:00:00Z'),
+      datetime_utc: '2026-09-11 12:00:00',
+      open: 4300,
+      high: 4310,
+      low: 4290,
+      close: 4305,
+      volume: 2
+    }
+  ];
+  model.replaceData(pack);
+  const eth1h = model.getSeries('ETH', '1h');
+  assert.strictEqual(eth1h.length, 1);
+  assert.strictEqual(eth1h[0].close, 4305);
+
+  const empty = new SeriesModel();
+  empty.replaceData(makePack());
+  assert.throws(() => empty.getSeries('ETH', '1h'), /No 1h series for ETH/);
+});
+
+test('mergeDailyPreferLive keeps pack-only days and does not invent gap bars', () => {
+  const packRows = [
+    { date_utc: '2026-08-31', timestamp: Date.parse('2026-08-31T00:00:00Z'), close: 100, ma20: 90 },
+    { date_utc: '2026-08-30', timestamp: Date.parse('2026-08-30T00:00:00Z'), close: 99, ma20: 89 }
+  ];
+  const liveRows = [
+    { date_utc: '2026-08-31', timestamp: Date.parse('2026-08-31T16:00:00Z'), close: 111 },
+    { date_utc: '2026-09-10', timestamp: Date.parse('2026-09-10T16:00:00Z'), close: 120 }
+  ];
+  const merged = mergeDailyPreferLive(packRows, liveRows);
+  assert.deepStrictEqual(merged.map(calendarDateKey), ['2026-08-30', '2026-08-31', '2026-09-10']);
+  const aug31 = merged.find((row) => calendarDateKey(row) === '2026-08-31');
+  assert.strictEqual(aug31.close, 111);
+  assert.strictEqual(aug31.ma20, 90);
+  assert.ok(!merged.some((row) => calendarDateKey(row) === '2026-09-01'));
 });

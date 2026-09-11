@@ -395,7 +395,7 @@ npm start
 8. No API keys in client JS. No trades. No invented series. Not Pooli.
 
 **Per-source status:**
-- OKX candles + OI: **done** (true incremental; public `history-candles` + `rubik/.../open-interest-history`; watermark + overlap; second refresh sends `before=` / `begin=`). Verified live: 1h candles URL returned 6 rows, sample close 80853 at 2026-09-03 16:00:00 UTC; OI 6 rows, `oi` 2.925M contracts. `npm test` mocks HTTP (80/80).
+- OKX candles: **done** for BTC (`1h`/`1d`) and ETH (`1h`/`1d`) (true incremental; public `history-candles`; per-source+symbol+interval watermark + overlap; second refresh sends `before=`). OKX OI remains **BTC only**. Verified live (prior): BTC 1h candles URL returned 6 rows, sample close 80853 at 2026-09-03 16:00:00 UTC; OI 6 rows, `oi` 2.925M contracts. `npm test` mocks HTTP.
 - ETF Farside: **doing** (bounded-overlap fallback, `nextCursor` is null, cursor ignored; Cloudflare often blocks the HTML scrape so pack CSV is re-parsed). Not incremental.
 - CoinGecko top100: **doing** (bounded-overlap fallback, 429-limited, `nextCursor` is null). Not incremental.
 
@@ -413,6 +413,36 @@ curl -sS -X POST 'http://localhost:3000/api/refresh?source=okx-candles&symbol=BT
 # 3) export only rows after the watermark
 curl -sS 'http://localhost:3000/api/series?symbol=BTC&interval=1h&sinceCursor=okx-candles:BTC:1h&format=json'
 ```
+
+### Daily last bar stuck on pack date (prefer live OKX ingest)
+**Status:** done  
+**Request:** Kevin (2026-09-11 PT): Daily last bar looks like ~Aug 31 while today is Sept 11. Hourly works fine. Incremental refresh should pull only the missing daily tail, same as BTC hourly. Free-text ticker UI is a separate follow-up — not this item.
+
+**Root cause (verified, do not re-derive):**
+1. `SeriesModel.getSeries` for `1d` preferred `getDailyFromIndicators(symbol)` (stagnant Flow pack `indicators_daily.csv`) and only fell back to `getBtcCandles('1d')` if that was empty. Live OKX daily rows were already in `store/ingest_series.json` (BTC 1d watermark lastTimestamp ~2026-09-10 16:00 UTC) and refresh adapters already included `okx-candles BTC 1d`. The chart never showed them because the pack won.
+2. `defaultAdapters()` registered OKX candles/OI for **BTC only**. No ETH OKX candle adapter, so ETH daily could not extend via live incremental ingest.
+3. “4-week probe / pack unrebuilt” is secondary: even with a live OKX daily watermark, the UI path ignored fresher ingest.
+
+**Must ship:**
+1. For daily BTC (and any symbol with live OKX/ingest candles): prefer / merge live `okx-candles` over pack indicators so the last daily bar is current (within ~1 day of now after Load Data). Do not invent bars. Gaps stay gaps.
+2. Register OKX ETH-USDT-SWAP candle adapters for `1h` and `1d` (public, no key — same endpoints as BTC with `instId=ETH-USDT-SWAP`). Watermarks per source+symbol+interval. Second refresh only requests the delta (`before=`).
+3. After Load Data, BTC 1d and ETH 1d last bar date near today (Sept 11 2026 era), not stuck on an old pack date. Hourly keeps working.
+4. Tests: series preference prefers fresher ingest over older pack; ETH adapters exist; idempotent second daily refresh uses watermark/`before=`. `npm test` passes.
+
+**Design:** `docs/WIKI.md` (Data Ingestion — series preference / live vs pack)
+
+**Verified (agent, 2026-09-11):** Seeded stagnant `indicators_daily.csv` ending **2026-08-31**. Old 1d path (`getDailyFromIndicators`) last bar stayed `2026-08-31T00:00:00.000Z`. After live OKX refresh + merge, `getSeries` last bars:
+
+| Series | Last timestamp (UTC) | Close |
+|---|---|---|
+| BTC 1d | **2026-09-11T16:00:00.000Z** | 77864 |
+| ETH 1d | **2026-09-11T16:00:00.000Z** | 2569.05 |
+| BTC 1h | 2026-09-11T16:00:00.000Z | 77855.7 |
+| ETH 1h | 2026-09-11T16:00:00.000Z | 2569.05 |
+
+Pack indicators still ended Aug 31 after refresh (ingest did not rewrite the CSV). Second daily refresh sent `before=1788883200000` for BTC and ETH (`instId=ETH-USDT-SWAP`); inserted 0, rowCount unchanged. `npm test` 159/159.
+
+**Not in this slice:** free-text ticker field.
 
 ## Investments
 
@@ -812,6 +842,6 @@ Save as `synthetic-etrade-activity.csv`, `npm start`, Investments tab → choose
 
 ---
 
-**Last Updated:** 2026-09-08  
+**Last Updated:** 2026-09-11  
 **Maintainer:** Kevin (reviewer), updated by Scoreboard team  
 **Status Tracking:** This file updated as features ship

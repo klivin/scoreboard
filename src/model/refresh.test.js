@@ -8,10 +8,11 @@ import {
   validateMonotonicAndGaps,
   watermarkId
 } from './source-adapter.js';
-import { createOkxCandleAdapter, createOkxOiAdapter, buildOkxCandlesUrl } from './okx-adapter.js';
+import { createOkxCandleAdapter, createOkxOiAdapter, buildOkxCandlesUrl, okxInstId } from './okx-adapter.js';
 import { createEtfAdapter, createCoinGeckoAdapter, parseFarsideHtml } from './fallback-adapters.js';
-import { createRefreshRuntime } from './refresh.js';
+import { createRefreshRuntime, defaultAdapters } from './refresh.js';
 import { SeriesModel } from './series.js';
+import { applySeriesStoreToPack } from './ingest-store.js';
 
 const HOUR = 3600000;
 const T0 = 1700000000000;
@@ -313,4 +314,97 @@ test('createOkxOiAdapter is incremental and uses the public rubik history path',
 
 test('watermark id is source:symbol:interval', () => {
   assert.strictEqual(watermarkId('okx-candles', 'btc', '1h'), 'okx-candles:BTC:1h');
+});
+
+test('defaultAdapters registers OKX ETH-USDT-SWAP candles for 1h and 1d', () => {
+  const adapters = defaultAdapters({ httpGet: async () => jsonOk([]) });
+  const ethCandles = adapters.filter((adapter) => adapter.id === 'okx-candles' && adapter.symbol === 'ETH');
+  assert.deepStrictEqual(ethCandles.map((adapter) => adapter.interval).sort(), ['1d', '1h']);
+  assert.ok(ethCandles.every((adapter) => adapter.instId === 'ETH-USDT-SWAP'));
+  assert.ok(adapters.some((adapter) => adapter.id === 'okx-candles' && adapter.symbol === 'BTC' && adapter.interval === '1d'));
+});
+
+test('ETH candle adapter uses public ETH-USDT-SWAP instId and no key', async () => {
+  const calls = [];
+  const httpGet = async (url) => {
+    calls.push(url);
+    return { ...jsonOk([]), url };
+  };
+  const adapter = createOkxCandleAdapter({ symbol: 'ETH', interval: '1d', httpGet, maxPages: 1 });
+  await adapter.fetchSince(null);
+  assert.ok(calls[0].includes('instId=ETH-USDT-SWAP'), calls[0]);
+  assert.ok(calls[0].includes('bar=1D'), calls[0]);
+  assert.ok(!/key|secret|passphrase/i.test(calls[0]));
+  assert.strictEqual(okxInstId('ETH'), 'ETH-USDT-SWAP');
+});
+
+test('idempotent second daily refresh uses watermark before= per BTC and ETH', async () => {
+  const DAY = 86400000;
+  const page = [
+    candle(T0 + 2 * DAY, 3),
+    candle(T0 + DAY, 2),
+    candle(T0, 1)
+  ];
+  const calls = [];
+  const httpGet = async (url) => {
+    calls.push(url);
+    return { ...jsonOk(page), url };
+  };
+  const runtime = createRefreshRuntime({
+    httpGet,
+    watermarkStore: memoryStore(),
+    seriesStore: memoryStore(),
+    errorLogStore: memoryStore(),
+    universeStore: memoryStore(),
+    adapters: [
+      createOkxCandleAdapter({ symbol: 'BTC', interval: '1d', httpGet, maxPages: 1 }),
+      createOkxCandleAdapter({ symbol: 'ETH', interval: '1d', httpGet, maxPages: 1 })
+    ],
+    now: (() => {
+      let t = 1_700_100_000_000;
+      return () => { t += 1000; return t; };
+    })()
+  });
+
+  const first = await runtime.runRefresh({ source: 'okx-candles', interval: '1d' });
+  assert.strictEqual(first.ran.length, 2);
+  assert.ok(first.ran.every((item) => item.status === 'ok'));
+  assert.ok(calls.slice(0, 2).every((url) => !url.includes('before=')), `first daily page must not send before=, got ${calls.slice(0, 2)}`);
+  assert.ok(calls[0].includes('instId=BTC-USDT-SWAP') || calls[1].includes('instId=BTC-USDT-SWAP'));
+  assert.ok(calls[0].includes('instId=ETH-USDT-SWAP') || calls[1].includes('instId=ETH-USDT-SWAP'));
+
+  const btcMark = first.ran.find((item) => item.symbol === 'BTC').lastTimestamp;
+  const ethMark = first.ran.find((item) => item.symbol === 'ETH').lastTimestamp;
+  assert.strictEqual(btcMark, T0 + 2 * DAY);
+  assert.strictEqual(ethMark, T0 + 2 * DAY);
+
+  const second = await runtime.runRefresh({ source: 'okx-candles', interval: '1d' });
+  assert.ok(second.ran.every((item) => item.inserted === 0));
+  const secondUrls = calls.slice(2);
+  assert.strictEqual(secondUrls.length, 2);
+  const expectedSince = overlapSince(btcMark, '1d');
+  assert.ok(secondUrls.every((url) => url.includes('before=')), `second daily request must send before=, got ${secondUrls}`);
+  assert.ok(secondUrls.every((url) => url.includes(`before=${expectedSince}`)), `second daily URL should start at overlap-adjusted watermark ${expectedSince}: ${secondUrls}`);
+  assert.ok(secondUrls.some((url) => url.includes('instId=ETH-USDT-SWAP')));
+  assert.ok(second.ran.every((item) => item.requestedSince === expectedSince));
+});
+
+test('applySeriesStoreToPack does not let ETH candles clobber BTC pack timestamps', () => {
+  const ts = T0;
+  const pack = {
+    candles_1d: {
+      data: [{ timestamp: ts, ts_ms: ts, close: 64000, symbol: 'BTC' }],
+      missing: false,
+      filename: 'okx_btc_usdt_swap_candles_1d.csv'
+    }
+  };
+  applySeriesStoreToPack(pack, [
+    { source: 'okx-candles', symbol: 'ETH', interval: '1d', timestamp: ts, close: 4300, id: 'eth' },
+    { source: 'okx-candles', symbol: 'BTC', interval: '1d', timestamp: ts + 86400000, close: 65000, id: 'btc' }
+  ]);
+  assert.strictEqual(pack.candles_1d.data.find((row) => row.timestamp === ts).close, 64000);
+  assert.ok(pack.candles_1d.data.some((row) => row.close === 65000));
+  assert.ok(!pack.candles_1d.data.some((row) => row.close === 4300));
+  assert.strictEqual(pack.live_candles.length, 2);
+  assert.ok(pack.live_candles.some((row) => row.symbol === 'ETH'));
 });

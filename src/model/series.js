@@ -7,7 +7,7 @@ import {
   pickOiContracts,
   pickVolume
 } from './overlays.js';
-import { applySeriesStoreToPack } from './ingest-store.js';
+import { applySeriesStoreToPack, overlayByTimestamp } from './ingest-store.js';
 import { ingestSeriesStore, ingestWatermarkStore, universeStore } from './store-adapter.js';
 
 function isBtcSymbol(symbol) {
@@ -35,7 +35,7 @@ export function missingSeriesMessage(symbol, interval) {
   const intervalNorm = interval === '1h' ? '1h' : '1d';
   const sym = String(symbol || '').toUpperCase();
   if (intervalNorm === '1h' && !isBtcSymbol(sym)) {
-    return `No 1h series for ${sym}. The Flow pack only includes hourly OKX BTC (okx_btc_usdt_swap_candles_1h.csv). Alt 1h is not in the pack — indicators_daily.csv is daily-only and is not interpolated into 1h. Missing readings are not plotted as 0.`;
+    return `No 1h series for ${sym}. Hourly OKX candles are ingested for BTC and ETH on Load Data; the Flow pack only includes hourly OKX BTC (okx_btc_usdt_swap_candles_1h.csv). Alt 1h is not interpolated from indicators_daily.csv. Missing readings are not plotted as 0.`;
   }
   if (intervalNorm === '1h' && isBtcSymbol(sym)) {
     return `No 1h series for BTC. Place okx_btc_usdt_swap_candles_1h.csv in /workspace/scoreboard/ or ./data/.`;
@@ -75,6 +75,49 @@ export function normalizeCandleRow(row) {
     volume: pickVolume(row),
     oi: pickOiContracts(row)
   };
+}
+
+export function calendarDateKey(row) {
+  if (!row) return null;
+  for (const value of [row.date_utc, row.datetime_utc]) {
+    if (value == null || value === '') continue;
+    const iso = String(value).trim().slice(0, 10);
+    if (/^\d{4}-\d{2}-\d{2}$/.test(iso)) return iso;
+  }
+  if (Number.isFinite(row.timestamp)) {
+    return new Date(row.timestamp).toISOString().slice(0, 10);
+  }
+  return null;
+}
+
+export function mergeDailyPreferLive(packRows, liveRows) {
+  const pack = Array.isArray(packRows) ? packRows : [];
+  const live = Array.isArray(liveRows) ? liveRows : [];
+  if (live.length === 0) return pack.slice();
+  if (pack.length === 0) return live.slice();
+
+  const map = new Map();
+  for (const row of pack) {
+    const key = calendarDateKey(row);
+    if (!key) continue;
+    map.set(key, row);
+  }
+  for (const row of live) {
+    const key = calendarDateKey(row);
+    if (!key) continue;
+    const existing = map.get(key);
+    if (!existing) {
+      map.set(key, row);
+      continue;
+    }
+    map.set(key, {
+      ...existing,
+      ...row,
+      date_utc: row.date_utc || existing.date_utc,
+      timestamp: Number.isFinite(row.timestamp) ? row.timestamp : existing.timestamp
+    });
+  }
+  return [...map.values()].sort((a, b) => a.timestamp - b.timestamp);
 }
 
 function parseSinceExclusive(since) {
@@ -174,7 +217,30 @@ export class SeriesModel {
   getBtcCandles(interval) {
     const candleKey = interval === '1h' ? 'candles_1h' : 'candles_1d';
     const candles = this.data[candleKey] && this.data[candleKey].data ? this.data[candleKey].data : [];
-    return candles.map(normalizeCandleRow).filter((row) => row && row.timestamp);
+    return candles
+      .filter((row) => {
+        if (!row) return false;
+        if (row.symbol == null || row.symbol === '') return true;
+        return isBtcSymbol(row.symbol);
+      })
+      .map(normalizeCandleRow)
+      .filter((row) => row && row.timestamp);
+  }
+
+  getLiveCandles(symbol, interval) {
+    const intervalNorm = interval === '1h' ? '1h' : '1d';
+    const upper = String(symbol || '').toUpperCase();
+    const live = (this.data.live_candles || [])
+      .filter((row) => (
+        row
+        && (row.source == null || row.source === 'okx-candles')
+        && String(row.symbol || '').toUpperCase() === upper
+        && (row.interval == null || row.interval === intervalNorm)
+      ))
+      .map(normalizeCandleRow)
+      .filter((row) => row && row.timestamp);
+    const packFile = isBtcSymbol(upper) ? this.getBtcCandles(intervalNorm) : [];
+    return overlayByTimestamp(packFile, live);
   }
 
   getSeries(symbol, interval = '1d', from = null, to = null, fields = null, options = {}) {
@@ -187,14 +253,12 @@ export class SeriesModel {
     let series = [];
 
     if (intervalNorm === '1h') {
-      if (isBtcSymbol(symbol)) {
-        series = this.getBtcCandles('1h');
-      }
+      series = this.getLiveCandles(symbol, '1h');
     } else {
-      series = this.getDailyFromIndicators(symbol);
-      if (series.length === 0 && isBtcSymbol(symbol)) {
-        series = this.getBtcCandles('1d');
-      }
+      series = mergeDailyPreferLive(
+        this.getDailyFromIndicators(symbol),
+        this.getLiveCandles(symbol, '1d')
+      );
     }
 
     if (!series || series.length === 0) {
@@ -238,6 +302,12 @@ export class SeriesModel {
       (this.data.candles_1d && this.data.candles_1d.data && this.data.candles_1d.data.length > 0)
     );
     if (hasBtcCandles) symbols.add('BTC');
+
+    for (const row of this.data.live_candles || []) {
+      if (row && row.symbol) {
+        symbols.add(String(row.symbol).toUpperCase());
+      }
+    }
 
     return [...symbols].sort();
   }

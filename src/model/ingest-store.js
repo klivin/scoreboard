@@ -76,12 +76,23 @@ function setPackRows(pack, key, filename, rows, missingIfEmpty = false) {
   };
 }
 
+function isBtcSymbol(symbol) {
+  const upper = String(symbol || 'BTC').toUpperCase();
+  return upper === 'BTC' || upper === 'BTCUSDT';
+}
+
 export function applySeriesStoreToPack(pack, seriesItems) {
   if (!pack) return pack;
   const items = seriesItems || [];
 
-  const candles1h = items.filter((row) => row.source === 'okx-candles' && row.interval === '1h');
-  const candles1d = items.filter((row) => row.source === 'okx-candles' && row.interval === '1d');
+  pack.live_candles = items.filter((row) => row && row.source === 'okx-candles');
+
+  const candles1h = items.filter((row) => (
+    row.source === 'okx-candles' && row.interval === '1h' && isBtcSymbol(row.symbol)
+  ));
+  const candles1d = items.filter((row) => (
+    row.source === 'okx-candles' && row.interval === '1d' && isBtcSymbol(row.symbol)
+  ));
   const oi1h = items.filter((row) => row.source === 'okx-oi' && row.interval === '1h');
   const oi1d = items.filter((row) => row.source === 'okx-oi' && row.interval === '1d');
   const etfBtc = items.filter((row) => row.source === 'etf-farside' && String(row.symbol).toUpperCase() === 'BTC');

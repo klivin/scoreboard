@@ -111,16 +111,30 @@ No API keys in client JS. OKX public endpoints need none. Keyed sources are out 
 
 | Source | Adapter id | Mode | What it does |
 |---|---|---|---|
-| OKX BTC-USDT-SWAP candles | `okx-candles` (`1h`, `1d`) | **incremental** | Live `GET https://www.okx.com/api/v5/market/history-candles?instId=BTC-USDT-SWAP&bar=1H\|1D`. Second refresh sends `before=<watermark - 3 bars>` so it only requests the delta (plus overlap). Public, no key. |
+| OKX BTC-USDT-SWAP candles | `okx-candles` BTC (`1h`, `1d`) | **incremental** | Live `GET https://www.okx.com/api/v5/market/history-candles?instId=BTC-USDT-SWAP&bar=1H\|1D`. Second refresh sends `before=<watermark - 3 bars>` so it only requests the delta (plus overlap). Public, no key. |
+| OKX ETH-USDT-SWAP candles | `okx-candles` ETH (`1h`, `1d`) | **incremental** | Same public candles endpoint with `instId=ETH-USDT-SWAP`. Own watermark `okx-candles:ETH:1h` / `okx-candles:ETH:1d`. Second refresh sends `before=` for that symbol+interval only. Public, no key. |
 | OKX BTC-USDT-SWAP OI | `okx-oi` (`1h`, `1d`) | **incremental** | Live `GET https://www.okx.com/api/v5/rubik/stat/contracts/open-interest-history?instId=BTC-USDT-SWAP&period=1H\|1D` with `begin=` when a cursor exists. `/api/v5/public/open-interest-history` is **404** (verified). Public, no key. |
 | ETF net flows (Farside) | `etf-farside` (BTC, ETH) | **bounded-overlap fallback** | `fetchSince` **ignores** the cursor. Re-fetches/re-parses the whole small HTML table (or the pack CSV if Cloudflare/HTML fails), then dedupes by date. `nextCursor` is always `null`. Not claimed as incremental. |
 | CoinGecko top100 | `coingecko-top100` | **bounded-overlap fallback** | `fetchSince` **ignores** the cursor. Re-fetches the whole top100 markets page. On **429**, re-parses `cg_top100_universe.json`. Categories stay blank when missing. `nextCursor` is always `null`. Not claimed as incremental. |
 
-Do not invent series. ETH 1h, multi-exchange OI, and alt hourly candles are still absent.
+Do not invent series. Multi-exchange OI and alt hourly candles (SOL, etc.) are still absent. ETH 1h/1d live candles come from OKX ingest after Load Data, not from interpolating the pack.
+
+### Series preference (live ingest vs pack indicators)
+
+Daily charts used to prefer `indicators_daily.csv` and only fall back to OKX candles when that file was empty. That left BTC/ETH 1d stuck on a stagnant pack date (~Aug 31) even when `ingest_series` already had a live `okx-candles` 1d watermark (~Sept 10).
+
+`getSeries(symbol, '1d')` now **merges** pack indicator rows with live `okx-candles` (plus BTC pack candle CSVs) **by calendar date**:
+
+- Overlapping dates: live OKX OHLC wins. Pack MA/Ichimoku columns are kept when the live row does not carry them.
+- Live-only dates (the missing daily tail) are appended. Pack-only older days stay.
+- Missing calendar days stay missing. No invented bars, no zero-fill.
+- Hourly is candles-only (never interpolated from daily). BTC 1h still reads the OKX 1h pack/ingest overlay. ETH 1h reads live ingest after Load Data; if ingest is empty the on-page missing message still fires.
+
+ETH ingest is **not** written onto the BTC pack candle files (`okx_btc_usdt_swap_candles_*.csv`). Those overlays stay BTC-only so equal timestamps cannot clobber BTC. ETH rows live on `pack.live_candles` / `ingest_series` filtered by symbol.
 
 ### Source Priority (pack seed)
 
-1. **Ingest store** after a refresh (`ingest_series` / `universe`)
+1. **Ingest store** after a refresh (`ingest_series` / `universe`) — live `okx-candles` preferred over older pack OHLC on the same day
 2. **Overlay path:** `/workspace/scoreboard/` (Flow pack on shared computer)
 3. **Repo path:** `./data/` (local development)
 4. **Error:** If a required symbol+interval still has no rows (no silent fallback, no zeros)
@@ -174,7 +188,9 @@ parseCSV(content) {
 ```javascript
 // src/model/series.js
 getSeries(symbol, interval) {
-  // Filters indicators_daily.csv by symbol column
+  // 1d: merge indicators_daily.csv (by symbol) with live okx-candles for that symbol
+  //     overlapping calendar dates prefer ingest OHLC; do not invent gap days
+  // 1h: BTC/ETH live OKX candles only — never interpolate daily into 1h
   // Maps senkou_a → senkouA, senkou_b → senkouB
   // Parses date_utc as UTC: new Date(date_utc + 'T00:00:00Z')
   // Throws error if symbol+interval not found
@@ -694,10 +710,10 @@ All endpoints support symbol parameter for multi-asset queries. Returns JSON by 
 - **Required:** Price pane autoscales OHLC + MAs + Ichimoku only. Volume, ETF millions, and OI contracts each use a separate pane (`priceScaleId` `volume` / `etf` / `oi`, never `right`).
 
 ### Hourly Data Limited (verified hypothesis)
-- **1h data that exists:** BTC only, from `okx_btc_usdt_swap_candles_1h.csv` (~1700 bars, columns `ts_ms`, `datetime_utc`, ohlcv) plus optional joined OI.
-- **1h data that does not exist:** ETH and other alts. Overlay / repo CSVs for alts are `indicators_daily.csv` (daily). There is no ETH 1h pack file.
-- **Required behavior:** BTC 1h charts from the OKX 1h file. ETH 1h shows an on-page missing message. Do not interpolate daily into 1h. Do not plot zeros.
-- **Impact:** 1h interval selector only has pack rows for BTC.
+- **1h pack file that exists:** BTC only, from `okx_btc_usdt_swap_candles_1h.csv` (~1700 bars, columns `ts_ms`, `datetime_utc`, ohlcv) plus optional joined OI.
+- **1h live ingest:** BTC and ETH from public OKX `history-candles` (`BTC-USDT-SWAP` / `ETH-USDT-SWAP`) after Load Data. Other alts have no 1h adapter.
+- **1h that still does not exist:** SOL and other alts. Overlay / repo CSVs for alts are `indicators_daily.csv` (daily). There is no ETH 1h pack file — ETH 1h is live ingest only.
+- **Required behavior:** BTC 1h charts from the OKX 1h file plus ingest overlay. ETH 1h charts from live ingest after Load Data; if ingest is empty, on-page missing message. Do not interpolate daily into 1h. Do not plot zeros.
 
 ### Historical Depth
 - **Pack scope:** Dataset time range determined by Flow pack
@@ -956,10 +972,10 @@ scoreboard.investments
 - Lightweight Charts replaces the custom canvas
 - Default viewport last few days; pan/zoom time axis
 - BTC 1h from `okx_btc_usdt_swap_candles_1h.csv` (`ts_ms` / `datetime_utc`); Load Data plots those candles
-- ETH 1h on-page missing message (no pack; not interpolated; not zeros)
+- ETH 1h: live OKX ingest after Load Data; on-page missing message if ingest is empty (no pack; not interpolated; not zeros)
 - Gaps stay gaps; last price marker + line
 - Overlay tooltip; horizontal + trend drawings
-- Status: **done** — verified on localhost (BTC 1h last few days, ETH 1d, ETH 1h missing)
+- Status: **done** — verified on localhost (BTC 1h last few days, ETH 1d pack, ETH 1h missing until live ingest)
 
 ### Overlay panes (y-axis bug)
 - Volume histogram on its own pane/scale (never `right` with candles)
@@ -989,10 +1005,12 @@ scoreboard.investments
 ### Incremental refresh (this PR)
 - Source adapters + `ingest_watermarks` / `ingest_series`
 - OKX BTC-USDT-SWAP candles + OI are live incremental (public, no key)
+- OKX ETH-USDT-SWAP candles (`1h`, `1d`) are live incremental with their own watermarks (public, no key). ETH OI is not registered.
+- Daily `getSeries` merges live `okx-candles` over older pack `indicators_daily.csv` by calendar date so the last bar is the ingest tail, not a stagnant pack date
 - ETF (Farside) and CoinGecko top100 use the same interface as a bounded-overlap fallback — cursor is not faked
 - Load Data refreshes sources first, then reads the store
 - Export: `since` / `sinceCursor`
-- Status: OKX incremental **done**. ETF/CG fallback **doing** (not incremental)
+- Status: OKX incremental **done** (BTC candles/OI + ETH candles). ETF/CG fallback **doing** (not incremental)
 
 ### Initial Release
 - ✅ Vanilla JS MVC architecture
@@ -1004,6 +1022,6 @@ scoreboard.investments
 
 ---
 
-**Last Updated:** 2026-09-08  
-**Version:** v1.6 (Universe money-scanner)  
+**Last Updated:** 2026-09-11  
+**Version:** v1.7 (daily live ingest preference + ETH OKX candles)  
 **Status:** Not Pooli. No keys client-side. No trades. Import stays in-browser.
