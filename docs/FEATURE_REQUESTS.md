@@ -664,10 +664,10 @@ Save as `synthetic-etrade-activity.csv`, `npm start`, Investments tab → choose
 
 ### Inline Chat pane (Bullmania-style, research only)
 **Status:** done  
-**Request:** Persistent in-app Chat tab/pane so Kevin can ask about any investment (example: “what are 5 crypto coins that are doing buybacks”) and tap a resolved asset onto the Overview chart. Research / paper only — **NFA**. No keys, no live trades, no custody. Not Pooli.
+**Request:** Persistent in-app Chat tab/pane so Kevin can ask about any investment (example: “what are 5 crypto coins that are doing buybacks”) and tap a resolved asset onto the Overview chart. Personal hobby / research. No keys, no live trades, no custody. Not Pooli. No NFA banner.
 
 **Must ship:**
-1. Chat tab (vanilla HTML/CSS/JS MVC). History in schema-versioned `scoreboard.chat` localStorage. Clear + **NFA banner always visible**.
+1. Chat tab (vanilla HTML/CSS/JS MVC). History in schema-versioned `scoreboard.chat` localStorage. Clear. No NFA banner.
 2. Defined **tool loop** (not UI regex ticker parsing): `resolve_assets`, optional `search_assets`, optional `get_chart_context`. Final assistant turn is structured `content[]` (`text` + `asset_card`). **No card without a successful `resolve_assets` row.** Unknowns: text-only “couldn’t resolve TICKER”.
 3. Every resolved stock/crypto is a tappable chip/card. Tap calls `AppController.loadAsset({ symbol, assetClass, intervalHint })` — same Overview symbol + **Load Data** path (`reloadSelected`). Free-text ticker work (PR #14 / `bc-cde1c994`) is **not** on main yet; this seam is thin so that PR can fill `#ticker-input` later. Do **not** duplicate OKX watermark ingest (PR #13).
 4. “load SKR”, “compare MSTR vs BTC” go through tools, not a client regex.
@@ -680,8 +680,8 @@ Save as `synthetic-etrade-activity.csv`, `npm start`, Investments tab → choose
 - House cloud agents stay grok-4.6. In-app chat uses whatever tool-calling key is already on the server, else the stub.
 
 **Verification:**
-- `npm test` — 172/172: resolve success → cards; unknown → no card; search → resolve → cards; tap/load payload; history schema migration; NFA banner present
-- Localhost UI (2026-09-11, this host — no Flow pack, **stub** provider, no LLM key): Chat tab NFA banner + Clear + demo-provider note. “5 buyback coins” → BNB/MKR/OKB/LEO/KCS cards. Tap BNB → Overview symbol BNB + Load Data path (`No data available for BNB 1d` is honest — pack missing). History persisted across tabs. “load SKR” and “compare MSTR vs BTC” cards. `load ZZQXNOTATICKER` → text-only couldn’t resolve, no card. Clear empties transcript; banner stays.
+- `npm test` — resolve success → cards; unknown → no card; search → resolve → cards; tap/load payload; history schema migration; NFA banner absent
+- Localhost UI (2026-09-11, this host — no Flow pack, **stub** provider, no LLM key): Chat tab Clear + demo-provider note (no NFA banner). “5 buyback coins” → BNB/MKR/OKB/LEO/KCS cards. Tap BNB → Overview symbol BNB + Load Data path (`No data available for BNB 1d` is honest — pack missing). History persisted across tabs. “load SKR” and “compare MSTR vs BTC” cards. `load ZZQXNOTATICKER` → text-only couldn’t resolve, no card. Clear empties transcript.
 - No secrets in git
 
 **Design:** `docs/WIKI.md` (Inline Chat pane)
@@ -695,7 +695,7 @@ Save as `synthetic-etrade-activity.csv`, `npm start`, Investments tab → choose
 **Request:** Wire the research-only Chat pane to real LLMs on Kevin’s Mac. Keep the existing tool loop + structured `asset_card`s. Default model: **Grok 4.6**. Easy swap to OpenAI. Never Pooli. Never commit keys.
 
 **Must ship:**
-1. xAI + OpenAI over the same OpenAI-compatible `/chat/completions` function-calling path. Stub when no usable key.
+1. xAI + non-5.6 OpenAI over OpenAI-compatible `/chat/completions`. OpenAI GPT-5.6 family uses `/v1/responses` for function tools (chat/completions rejects tools unless `reasoning_effort` is `none`). Stub when no usable key.
 2. Default xAI model id `grok-4.6` (verified against current xAI docs). OpenAI default `gpt-4o-mini`.
 3. Env defaults: `SCOREBOARD_CHAT_PROVIDER=xai|openai`, `SCOREBOARD_CHAT_MODEL=...`. In-app Chat settings (provider + model) persist in schema-versioned `scoreboard.chat` localStorage. Env wins when no override.
 4. Tiny zero-dep dotenv loader reads gitignored `.env` on the Node server. Canonical keys (aliases accepted):
@@ -704,11 +704,11 @@ Save as `synthetic-etrade-activity.csv`, `npm start`, Investments tab → choose
    - `SCOREBOARD_CHAT_PROVIDER`, `SCOREBOARD_CHAT_MODEL`
    - optional `SCOREBOARD_XAI_BASE_URL`, `SCOREBOARD_OPENAI_BASE_URL`
 5. `/api/chat/status` may expose `{ provider, hasLiveLlm, model }` — never the key. Request body/query/header may override provider/model only.
-6. NFA banner + research-only system prompt stay. Settings never store API keys in localStorage.
+6. No NFA banner. Research/personal system prompt (no legal-spam disclaimer). Settings never store API keys in localStorage.
 
 **Verification:**
 - `npm test` — 223/223: env detection, alias keys, env vs request precedence, settings persist without keys, stub with no keys
-- Localhost UI (2026-09-11, this host — no LLM key): Chat tab NFA banner always visible + Chat model picker (Provider/Model). Server default → stub note naming `SCOREBOARD_XAI_API_KEY` / `SCOREBOARD_OPENAI_API_KEY`. Select xAI + Grok 4.6 still stub (honest). Load SKR → SKR card. Clear history keeps picker. `scoreboard.chat` schemaVersion 2 settings are `{ provider, model }` only — no keys. OpenAI + `gpt-4o-mini` still stub; tap SKR card → Overview ticker SKR + honest missing series. Live path unit-tested with mock fetch (`grok-4.6` + tools); this host had no key so live completions were not called.
+- Localhost UI (2026-09-11, this host — no LLM key): Chat tab model picker (Provider/Model); no NFA banner. Server default → stub note naming `SCOREBOARD_XAI_API_KEY` / `SCOREBOARD_OPENAI_API_KEY`. Select xAI + Grok 4.6 still stub (honest). Load SKR → SKR card. Clear history keeps picker. `scoreboard.chat` schemaVersion 2 settings are `{ provider, model }` only — no keys. OpenAI + `gpt-4o-mini` still stub; tap SKR card → Overview ticker SKR + honest missing series. Live path unit-tested with mock fetch (`grok-4.6` + tools; GPT-5.6 → `/v1/responses`); this host had no key so live completions were not called.
 
 **Shipped:** zero-dep `.env` loader; canonical `SCOREBOARD_*` vars + legacy aliases; default xAI model id `grok-4.6`; in-app picker persists in `scoreboard.chat` `collections.settings`.
 

@@ -1,5 +1,3 @@
-export const NFA_DISCLAIMER = 'Not financial advice (NFA). Research / paper only — no orders, no keys, no custody.';
-
 export function flattenContent(content) {
   if (typeof content === 'string') return content;
   if (!Array.isArray(content)) return '';
@@ -108,7 +106,7 @@ export function cardsFromResolved(results, { summary } = {}) {
   const lines = [];
   if (summary) lines.push(summary);
   if (ok.length && !summary) {
-    lines.push(`Research-only notes for ${ok.map((row) => row.symbol).join(', ')}. ${NFA_DISCLAIMER}`);
+    lines.push(`Research notes for ${ok.map((row) => row.symbol).join(', ')}.`);
   }
   for (const row of bad) {
     const label = row.query || row.symbol || 'that symbol';
@@ -117,7 +115,7 @@ export function cardsFromResolved(results, { summary } = {}) {
   if (!ok.length && !bad.length) {
     lines.push('No assets resolved.');
   }
-  const content = [{ type: 'text', markdown: lines.filter(Boolean).join('\n\n') || NFA_DISCLAIMER }];
+  const content = [{ type: 'text', markdown: lines.filter(Boolean).join('\n\n') || 'No assets resolved.' }];
   for (const row of ok) {
     content.push({
       type: 'asset_card',

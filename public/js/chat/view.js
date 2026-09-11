@@ -1,7 +1,5 @@
 import { modelsForProvider } from './schema.js';
 
-export const NFA_BANNER_TEXT = 'Not financial advice (NFA). Research / paper only — no orders, no keys, no custody. Cards appear only after tools resolve an asset. Tap a card to load Overview (same Load Data path).';
-
 const EXAMPLES = [
   { label: '5 buyback coins', text: 'what are 5 crypto coins that are doing buybacks' },
   { label: 'Load SKR', text: 'load SKR' },
@@ -102,7 +100,6 @@ export function buildChatPaneHtml(model = {}) {
     : '<p class="chat-empty">Ask about any catalog investment. Example: coins doing buybacks, load SKR, compare MSTR vs BTC.</p>';
 
   return `<div class="chat-pane">
-    <div class="chat-nfa-banner" id="chat-nfa-banner" data-testid="chat-nfa-banner">${escapeHtml(NFA_BANNER_TEXT)}</div>
     <div class="chat-toolbar">
       ${renderSettings(model)}
       <button type="button" id="chat-clear-btn">Clear history</button>
