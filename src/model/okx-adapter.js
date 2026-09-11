@@ -5,6 +5,13 @@ export const OKX_BASE = 'https://www.okx.com';
 export const OKX_CANDLES_PATH = '/api/v5/market/history-candles';
 export const OKX_OI_HISTORY_PATH = '/api/v5/rubik/stat/contracts/open-interest-history';
 export const OKX_INST_ID = 'BTC-USDT-SWAP';
+export const OKX_ETH_INST_ID = 'ETH-USDT-SWAP';
+
+export function okxInstId(symbol) {
+  const upper = String(symbol || 'BTC').toUpperCase();
+  if (upper === 'ETH' || upper === 'ETHUSDT') return OKX_ETH_INST_ID;
+  return OKX_INST_ID;
+}
 
 const BAR = { '1h': '1H', '1d': '1D' };
 const DEFAULT_LIMIT = 100;
@@ -117,11 +124,13 @@ export function createOkxCandleAdapter({
   limit = DEFAULT_LIMIT,
   maxPages = MAX_PAGES
 } = {}) {
+  const instId = okxInstId(symbol);
   return {
     id: 'okx-candles',
     symbol,
     interval,
     mode: 'incremental',
+    instId,
     async fetchSince(cursor) {
       const since = cursor && cursor.since != null ? cursor.since : null;
       const requestUrls = [];
@@ -129,7 +138,13 @@ export function createOkxCandleAdapter({
       let after = null;
 
       for (let page = 0; page < maxPages; page++) {
-        const url = buildOkxCandlesUrl({ interval, since: after == null ? since : null, after, limit });
+        const url = buildOkxCandlesUrl({
+          interval,
+          since: after == null ? since : null,
+          after,
+          limit,
+          instId
+        });
         requestUrls.push(url);
         const { data } = await readOkxPage(http, url);
         if (!data.length) break;

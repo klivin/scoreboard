@@ -21,6 +21,8 @@ export function defaultAdapters(deps = {}) {
   return [
     createOkxCandleAdapter({ symbol: 'BTC', interval: '1h', ...deps }),
     createOkxCandleAdapter({ symbol: 'BTC', interval: '1d', ...deps }),
+    createOkxCandleAdapter({ symbol: 'ETH', interval: '1h', ...deps }),
+    createOkxCandleAdapter({ symbol: 'ETH', interval: '1d', ...deps }),
     createOkxOiAdapter({ symbol: 'BTC', interval: '1h', ...deps }),
     createOkxOiAdapter({ symbol: 'BTC', interval: '1d', ...deps }),
     createEtfAdapter({ symbol: 'BTC', ...deps }),
