@@ -8,7 +8,6 @@ const STATIC_ASSETS = [
     aliases: ['bitcoin', 'xbt', 'btc-usdt'],
     blurb: 'Largest crypto by market cap. Scoreboard has Flow-pack + OKX BTC-USDT-SWAP series.',
     strategyConsiderations: [
-      'Research only — not a recommendation to buy or sell.',
       'Use Overview 1d and 1h (OKX swap) separately; do not interpolate.'
     ]
   },
@@ -17,7 +16,6 @@ const STATIC_ASSETS = [
     aliases: ['ethereum', 'ether'],
     blurb: 'Smart-contract platform. Pack has daily indicators; 1h may be missing until ingest exists.',
     strategyConsiderations: [
-      'Research only — not a recommendation to buy or sell.',
       'ETH 1h is not in the original Flow pack; missing stays missing.'
     ]
   },
@@ -25,7 +23,7 @@ const STATIC_ASSETS = [
     symbol: 'SOL', name: 'Solana', assetClass: 'crypto', venue: 'flow-pack',
     aliases: ['solana'],
     blurb: 'High-throughput L1. Daily pack series when present.',
-    strategyConsiderations: ['Research only — not a recommendation to buy or sell.']
+    strategyConsiderations: ['Daily pack series when present; missing stays missing.']
   },
   {
     symbol: 'AVAX', name: 'Avalanche', assetClass: 'crypto', venue: 'flow-pack',
@@ -65,7 +63,6 @@ const STATIC_ASSETS = [
     tags: ['buyback', 'burn'],
     blurb: 'Binance exchange token. Historically uses a quarterly burn / BNB Auto-Burn program (research catalog, not a live on-chain feed).',
     strategyConsiderations: [
-      'Research only — not a recommendation to buy or sell.',
       'Burn schedule and amount change; confirm on the issuer’s current disclosures.',
       'Exchange-token risk is tied to Binance venue and regulatory outcomes.'
     ]
@@ -76,7 +73,6 @@ const STATIC_ASSETS = [
     tags: ['buyback', 'burn'],
     blurb: 'Maker / Sky surplus has historically bought and burned MKR (research catalog).',
     strategyConsiderations: [
-      'Research only — not a recommendation to buy or sell.',
       'Protocol buybacks depend on surplus and governance — not a guaranteed schedule.',
       'Ticker / rebrand risk (Sky / new tokens) — resolve the listing before charting.'
     ]
@@ -87,7 +83,6 @@ const STATIC_ASSETS = [
     tags: ['buyback', 'burn'],
     blurb: 'OKX exchange token. Issuer has run buyback-and-burn programs (research catalog).',
     strategyConsiderations: [
-      'Research only — not a recommendation to buy or sell.',
       'Exchange-token supply changes with issuer policy, not a protocol fee switch.'
     ]
   },
@@ -97,7 +92,6 @@ const STATIC_ASSETS = [
     tags: ['buyback', 'burn'],
     blurb: 'iFinex / Bitfinex utility token with a long-running repurchase program (research catalog).',
     strategyConsiderations: [
-      'Research only — not a recommendation to buy or sell.',
       'Repurchases are issuer-discretionary and venue-specific.'
     ]
   },
@@ -107,7 +101,6 @@ const STATIC_ASSETS = [
     tags: ['buyback', 'burn'],
     blurb: 'KuCoin exchange token; historical daily buyback-and-burn (research catalog).',
     strategyConsiderations: [
-      'Research only — not a recommendation to buy or sell.',
       'Exchange-token burns can pause or change without on-chart warning.'
     ]
   },
@@ -116,7 +109,6 @@ const STATIC_ASSETS = [
     aliases: [],
     blurb: 'SKR is in the research catalog so Chat can resolve “load SKR”. Confirm the venue; Overview series may be missing until free-text ticker ingest lands.',
     strategyConsiderations: [
-      'Research only — not a recommendation to buy or sell.',
       'If Load Data errors, the symbol resolved but no cached OHLC exists — that is not a fake chart.'
     ]
   },
@@ -125,7 +117,6 @@ const STATIC_ASSETS = [
     aliases: ['microstrategy', 'strategy', 'mstr'],
     blurb: 'Public equity known for a large Bitcoin treasury. Not a coin — charting needs an equity adapter (PR #14).',
     strategyConsiderations: [
-      'Research only — not a recommendation to buy or sell.',
       'Equity path is not the OKX swap ingest. Missing series stay missing — no invented bars.',
       'BTC treasury correlation is not the same as holding BTC.'
     ]
@@ -171,7 +162,6 @@ function withDefaults(asset) {
     tags: [],
     blurb: asset.blurb || `${asset.name} (${asset.symbol}).`,
     strategyConsiderations: asset.strategyConsiderations || [
-      'Research only — not a recommendation to buy or sell.',
       'Confirm series on Overview; missing data stays missing.'
     ],
     ...asset,

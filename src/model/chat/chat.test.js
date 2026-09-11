@@ -456,4 +456,8 @@ test('stub and live replies do not append NFA disclaimer spam', async () => {
   const empty = await createStubProvider({ catalog }).complete([{ role: 'user', content: 'how does the naive baseline work?' }]);
   assert.doesNotMatch(empty.content[0].markdown, /not financial advice/i);
   assert.doesNotMatch(empty.content[0].markdown, /\bNFA\b/);
+  const notes = result.content
+    .filter((block) => block.type === 'asset_card')
+    .flatMap((card) => card.strategyConsiderations || []);
+  assert.ok(notes.every((note) => !/not a recommendation to buy or sell/i.test(note)));
 });
