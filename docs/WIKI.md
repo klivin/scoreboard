@@ -126,9 +126,10 @@ Daily charts used to prefer `indicators_daily.csv` and only fall back to OKX can
 `getSeries(symbol, '1d')` now **merges** pack indicator rows with live `okx-candles` (plus BTC pack candle CSVs) **by calendar date**:
 
 - Overlapping dates: live OKX OHLC wins. Pack MA/Ichimoku columns are kept when the live row does not carry them.
-- Live-only dates (the missing daily tail) are appended. Pack-only older days stay.
+- Live-only dates (the missing daily tail) are appended. Pack-only older days with a finite close stay.
+- Pack-only rows **without a finite `close`** are dropped (Flow pack `indicators_daily.csv` can carry probe stubs through a future date such as 2026-09-26 with `close: null`). After merge, trailing non-finite closes are trimmed so `.at(-1)` is the last live OKX day, not a null pack stub. Live gaps stay gaps — closes are not invented or zero-filled.
 - Missing calendar days stay missing. No invented bars, no zero-fill.
-- Hourly is candles-only (never interpolated from daily). BTC 1h still reads the OKX 1h pack/ingest overlay. ETH 1h reads live ingest after Load Data; if ingest is empty the on-page missing message still fires.
+- Hourly is candles-only (never interpolated from daily). BTC 1h still reads the OKX 1h pack/ingest overlay. ETH 1h reads live ingest after Load Data; if ingest is empty the on-page missing message still fires. ETH 1d ingest is 0 until Load Data runs the ETH OKX adapters.
 
 ETH ingest is **not** written onto the BTC pack candle files (`okx_btc_usdt_swap_candles_*.csv`). Those overlays stay BTC-only so equal timestamps cannot clobber BTC. ETH rows live on `pack.live_candles` / `ingest_series` filtered by symbol.
 
@@ -1006,7 +1007,7 @@ scoreboard.investments
 - Source adapters + `ingest_watermarks` / `ingest_series`
 - OKX BTC-USDT-SWAP candles + OI are live incremental (public, no key)
 - OKX ETH-USDT-SWAP candles (`1h`, `1d`) are live incremental with their own watermarks (public, no key). ETH OI is not registered.
-- Daily `getSeries` merges live `okx-candles` over older pack `indicators_daily.csv` by calendar date so the last bar is the ingest tail, not a stagnant pack date
+- Daily `getSeries` merges live `okx-candles` over older pack `indicators_daily.csv` by calendar date. Pack-only `close: null` probe stubs (e.g. through 2026-09-26) are dropped so the last bar is the live OKX day, not a null pack tail.
 - ETF (Farside) and CoinGecko top100 use the same interface as a bounded-overlap fallback — cursor is not faked
 - Load Data refreshes sources first, then reads the store
 - Export: `since` / `sinceCursor`

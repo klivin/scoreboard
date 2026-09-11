@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert';
-import { SeriesModel, filterRowsBySymbol, mapIndicatorRow, normalizeCandleRow, missingSeriesMessage, mergeDailyPreferLive, calendarDateKey } from './series.js';
+import { SeriesModel, filterRowsBySymbol, mapIndicatorRow, normalizeCandleRow, missingSeriesMessage, mergeDailyPreferLive, calendarDateKey, hasFiniteClose } from './series.js';
 import { parseCSV } from './ingest.js';
 import { formatUtcTick } from './dates.js';
 
@@ -373,4 +373,103 @@ test('mergeDailyPreferLive keeps pack-only days and does not invent gap bars', (
   assert.strictEqual(aug31.close, 111);
   assert.strictEqual(aug31.ma20, 90);
   assert.ok(!merged.some((row) => calendarDateKey(row) === '2026-09-01'));
+});
+
+test('daily merge discards pack-only null-close tails so last finite close is live', () => {
+  const packRows = [
+    { date_utc: '2026-08-30', timestamp: Date.parse('2026-08-30T00:00:00Z'), close: 64000 },
+    { date_utc: '2026-08-31', timestamp: Date.parse('2026-08-31T00:00:00Z'), close: 65000 },
+    { date_utc: '2026-09-11', timestamp: Date.parse('2026-09-11T00:00:00Z'), close: null },
+    { date_utc: '2026-09-26', timestamp: Date.parse('2026-09-26T00:00:00Z'), close: null }
+  ];
+  const liveRows = [
+    { date_utc: '2026-09-10', timestamp: Date.parse('2026-09-10T16:00:00Z'), close: 77864 }
+  ];
+  const merged = mergeDailyPreferLive(packRows, liveRows);
+  const last = merged.at(-1);
+  assert.ok(hasFiniteClose(last));
+  assert.strictEqual(last.close, 77864);
+  assert.strictEqual(calendarDateKey(last), '2026-09-10');
+  assert.ok(merged.some((row) => calendarDateKey(row) === '2026-08-30'));
+  assert.ok(!merged.some((row) => calendarDateKey(row) === '2026-09-11'));
+  assert.ok(!merged.some((row) => calendarDateKey(row) === '2026-09-26'));
+  assert.ok(!merged.some((row) => row.close === 0));
+});
+
+test('pack-only null tails are dropped even when live ingest is empty', () => {
+  const packRows = [
+    { date_utc: '2026-08-31', timestamp: Date.parse('2026-08-31T00:00:00Z'), close: 65000 },
+    { date_utc: '2026-09-26', timestamp: Date.parse('2026-09-26T00:00:00Z'), close: null }
+  ];
+  const merged = mergeDailyPreferLive(packRows, []);
+  assert.strictEqual(merged.length, 1);
+  assert.strictEqual(calendarDateKey(merged.at(-1)), '2026-08-31');
+  assert.strictEqual(merged.at(-1).close, 65000);
+});
+
+test('getSeries 1d last bar is live finite close, not a future pack null stub', () => {
+  const model = new SeriesModel();
+  const pack = makePack();
+  for (let day = 11; day <= 26; day++) {
+    const date_utc = `2026-09-${String(day).padStart(2, '0')}`;
+    pack.indicators.data.push({
+      date_utc,
+      asset_id: 'btc',
+      symbol: 'BTC',
+      open: '',
+      high: '',
+      low: '',
+      close: '',
+      volume: ''
+    });
+    pack.indicators.data.push({
+      date_utc,
+      asset_id: 'eth',
+      symbol: 'ETH',
+      open: '',
+      high: '',
+      low: '',
+      close: '',
+      volume: ''
+    });
+  }
+  pack.live_candles = [
+    {
+      source: 'okx-candles',
+      symbol: 'BTC',
+      interval: '1d',
+      timestamp: Date.parse('2026-09-10T16:00:00Z'),
+      datetime_utc: '2026-09-10 16:00:00',
+      date_utc: '2026-09-10',
+      open: 77000,
+      high: 78000,
+      low: 76000,
+      close: 77864,
+      volume: 12
+    },
+    {
+      source: 'okx-candles',
+      symbol: 'ETH',
+      interval: '1d',
+      timestamp: Date.parse('2026-09-10T16:00:00Z'),
+      datetime_utc: '2026-09-10 16:00:00',
+      date_utc: '2026-09-10',
+      open: 2500,
+      high: 2600,
+      low: 2400,
+      close: 2569.05,
+      volume: 9
+    }
+  ];
+  model.replaceData(pack);
+
+  const btc = model.getSeries('BTC', '1d');
+  const eth = model.getSeries('ETH', '1d');
+  assert.strictEqual(btc.at(-1).close, 77864);
+  assert.strictEqual(eth.at(-1).close, 2569.05);
+  assert.strictEqual(calendarDateKey(btc.at(-1)), '2026-09-10');
+  assert.strictEqual(calendarDateKey(eth.at(-1)), '2026-09-10');
+  assert.ok(btc.every((row) => hasFiniteClose(row) || calendarDateKey(row) <= '2026-09-10'));
+  assert.ok(!btc.some((row) => calendarDateKey(row) === '2026-09-26'));
+  assert.ok(!eth.some((row) => calendarDateKey(row) === '2026-09-26'));
 });

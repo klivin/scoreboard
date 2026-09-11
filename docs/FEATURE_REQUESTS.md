@@ -444,6 +444,18 @@ Pack indicators still ended Aug 31 after refresh (ingest did not rewrite the CSV
 
 **Not in this slice:** free-text ticker field.
 
+### Daily last bar is a null pack stub after live merge
+**Status:** doing  
+**Request:** Residual after PR #13 (Kevin’s Mac, 2026-09-11 PT). `mergeDailyPreferLive` prefers live OHLC on overlapping dates, but Flow pack `indicators_daily.csv` still has trailing rows through **2026-09-26** with `close: null`. Those pack-only null days sort **after** the live last bar (BTC ingest last finite close ~2026-09-10 / agent 2026-09-11), so `getSeries('BTC','1d').at(-1)` is a null-close future pack day. Chart “last bar” still looks wrong. ETH 1d ingest count is 0 until a fresh Load Data with the ETH adapters.
+
+**Must ship:**
+1. Do not keep pack-only rows that lack a finite `close` (trim trailing non-finite closes after merge). Live gaps stay gaps — do not invent closes.
+2. After merge+optional refresh, last BTC/ETH 1d bar with finite close is the live OKX day (near today), not a null pack stub.
+3. Test: pack with older real days + future null closes + live mid date → series last finite close equals live; null pack tails discarded.
+4. Docs + `npm test`. No free-text ticker UI.
+
+**Design:** `docs/WIKI.md` (series preference — pack null tails)
+
 ## Investments
 
 ### Investments tab + local brokerage import (first slice)
