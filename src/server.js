@@ -16,7 +16,9 @@ import {
   handleGetTradingSignals,
   handleGetBacktest,
   handlePostRefresh,
-  handleGetRefreshStatus
+  handleGetRefreshStatus,
+  handleGetChatStatus,
+  handlePostChat
 } from './controller/api.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -47,6 +49,8 @@ app.get('/api/trading-signals', handleGetTradingSignals);
 app.get('/api/backtest', handleGetBacktest);
 app.post('/api/refresh', handlePostRefresh);
 app.get('/api/refresh/status', handleGetRefreshStatus);
+app.get('/api/chat/status', handleGetChatStatus);
+app.post('/api/chat', handlePostChat);
 
 app.get('/health', (req, res) => {
   res.json({ status: 'ok', timestamp: Date.now() });

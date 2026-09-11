@@ -466,6 +466,81 @@ Clicking a scanner row sets `#symbol-select` and opens Overview (same `updateOve
 
 ---
 
+## Inline Chat pane (research only)
+
+**Status:** doing. Bullmania-style **Chat** tab: ask about any investment, get a short research summary plus tappable asset cards. Cards load the Overview chart. **Not financial advice. No keys, no orders, no custody. Not Pooli.**
+
+House Cursor agents stay grok-4.6. The **in-app** runtime is a server-side tool loop (`POST /api/chat`). If `OPENAI_API_KEY` or `XAI_API_KEY` / `GROK_API_KEY` is set on the process, that OpenAI-compatible function-calling endpoint is used. **Never** put a key in the repo or in client JS. If no key is present, a deterministic **stub provider** still runs the same tools so the UI and tests work.
+
+### Why a tool loop (not regex)
+
+The UI must not scrape free text for tickers. Interactive chips are valid only when `resolve_assets` returned `{ ok: true }` for that query. “load SKR” and “compare MSTR vs BTC” are tool calls, then structured cards.
+
+### System prompt (tight)
+
+Research-only hobby dashboard. Never custody / keys / orders. NFA. Only emit chart links/cards for assets the tools resolved. If a symbol cannot be resolved, say so — no fake chips. Call tools first, then write cards.
+
+### Tools
+
+| Tool | Args | Result |
+|---|---|---|
+| `resolve_assets` | `{ queries: string[] }` | Per query: `{ ok, query, symbol, name, assetClass: crypto\|equity\|etf\|other, venue, scoreboardId, load: { symbol, assetClass, intervalHint: '1d'\|'1h' } }`. Unknowns: `ok: false`. |
+| `search_assets` | `{ naturalQuery }` | Ranked catalog hits (e.g. “coins doing buybacks”). Then the model **must** `resolve_assets` on the hits. Static research tags, not a live chain feed. |
+| `get_chart_context` | `{ scoreboardId }` | Last cached bar metadata if `ingest_series` / pack series exists. **Never invent OHLCV.** Missing → `{ ok: false }`. |
+
+### Final assistant turn
+
+```
+content: [
+  { type: 'text', markdown },
+  { type: 'asset_card', symbol, name, assetClass, scoreboardId, load, blurb, strategyConsiderations[] }
+]
+```
+
+The server **strips** any `asset_card` that does not match a successful `resolve_assets` row from this turn. Same `load` payload the charting path needs.
+
+### Tap → chart
+
+`AppController.loadAsset({ symbol, assetClass, intervalHint })` (`public/js/load-asset.js`):
+
+1. Write the symbol onto `#symbol-select` (and `#ticker-input` when PR #14 lands)
+2. Set `#interval-select` from `intervalHint` (`1d` default; `1h` when the card asked for hourly)
+3. Switch to Overview
+4. Call existing **Load Data** `reloadSelected()` (`POST /api/refresh` then `GET /api/indicators`)
+
+Do **not** add a second OKX watermark ingest here. Daily freshness is PR #13; arbitrary tickers are PR #14. This seam stays thin so those PRs can fill it.
+
+### Persistence
+
+```
+scoreboard.chat
+  schemaVersion: 1
+  namespace: chat
+  collections.messages[]   # user + assistant turns (content blocks)
+  collections.settings     # reserved
+```
+
+Unversioned arrays / `{ messages }` blobs migrate; history is never discarded. **Clear history** wipes the collection. The NFA banner is not optional — it is part of the pane chrome, not a dismissible toast.
+
+### API
+
+```
+GET  /api/chat/status   # { provider: stub|openai|xai, hasLiveLlm }
+POST /api/chat          # { messages } → { provider, content, toolTrace, disclaimer }
+```
+
+Client never sees API keys. Optional env (server only): `OPENAI_API_KEY`, `OPENAI_BASE_URL`, `OPENAI_MODEL`, `XAI_API_KEY` or `GROK_API_KEY`, `XAI_BASE_URL`, `CHAT_MODEL`.
+
+### Files
+
+```
+src/model/chat/           # catalog, tools, stub, live provider, loop, sanitize
+public/js/chat/           # schema, store, view, controller
+public/js/load-asset.js   # tap → Overview Load Data seam
+```
+
+---
+
 ## Forecasting
 
 ### Naive Baseline
@@ -585,6 +660,7 @@ GET /api/forecast?symbol=BTC&horizon=weekly|monthly|7|30
 **Browser local stores (separate namespaces):**
 - `scoreboard.investments` — Investments tab (REAL / TRACKING)
 - `scoreboard.forecasts` — Forecasts tab cache + filter settings
+- `scoreboard.chat` — Chat tab history (`schemaVersion` + `collections.messages`)
 
 These server-side files are **not** used for brokerage imports. Investments use a separate browser namespace (`scoreboard.investments`).
 
@@ -665,6 +741,8 @@ GET /api/universe
 GET /api/scanner
 GET /api/scanner/evaluate
 GET /api/missing
+GET /api/chat/status
+POST /api/chat
 ```
 
 ### Health
@@ -721,6 +799,8 @@ npm test
 - Forecast generation
 - Forecast maturity (`too-early` / `matured` / `missing-actual`) and MAE vs naive (never fake 0)
 - Forecasts tab REAL/TRACKING filter + click payload
+- Chat tool loop (resolve → cards; unknown → no card; search → resolve)
+- Chat tap/load payload + `scoreboard.chat` schema migration + NFA banner
 - Signal strategies (synthetic crosses, RSI recovery, lookahead)
 - Consensus aggregation
 - Backtest metrics (drawdown, CAGR, simulateTrades)
@@ -755,6 +835,13 @@ Server runs on `http://localhost:3000`
 PORT=3000
 STORE_TYPE=local  # or 'firestore'
 FIREBASE_CONFIG='{"apiKey":"..."}' # if STORE_TYPE=firestore
+# Chat (server-side only — never commit, never send to the browser)
+# OPENAI_API_KEY=...
+# OPENAI_BASE_URL=https://api.openai.com/v1
+# OPENAI_MODEL=gpt-4o-mini
+# XAI_API_KEY=...          # or GROK_API_KEY
+# XAI_BASE_URL=https://api.x.ai/v1
+# CHAT_MODEL=grok-4
 ```
 
 ### File Structure
@@ -773,6 +860,8 @@ scoreboard/
 │   │   ├── controller.js
 │   │   ├── forecasts/     # Forecasts tab (list, filter, export, click jump)
 │   │   ├── investments/   # Investments tab (local import)
+│   │   ├── chat/          # Chat tab (history, cards, NFA)
+│   │   ├── load-asset.js  # tap → Overview Load Data
 │   │   └── view.js
 │   └── index.html
 ├── src/                   # Backend
@@ -788,6 +877,7 @@ scoreboard/
 │   │   ├── indicators.js
 │   │   ├── ingest.js
 │   │   ├── series.js
+│   │   ├── chat/          # Chat tools, stub, live provider
 │   │   ├── store.js
 │   │   └── store-adapter.js
 │   └── server.js
@@ -916,6 +1006,13 @@ scoreboard.investments
 
 ## Changelog
 
+### Inline Chat pane (research only)
+- Chat tab: schema-versioned `scoreboard.chat` history, always-visible NFA banner, Clear
+- Server tool loop: `resolve_assets` / `search_assets` / `get_chart_context` then structured `content[]`
+- Cards only from successful resolve; tap → `loadAsset` → Overview Load Data (`reloadSelected`)
+- Live OpenAI-compatible function calling if a server key exists; otherwise deterministic stub
+- Status: **doing** — no keys in repo; PR #14 ticker field not required
+
 ### Forecasts tab (scored history, second product slice)
 - Forecasts tab lists walk-forward scored records: symbol, horizon, as-of, predicted range/point, confidence, model/version, actual, MAE vs naive, status
 - Status `too-early` | `matured` | `missing-actual`. MAE is `null` unless matured — never a fake 0
@@ -1004,6 +1101,6 @@ scoreboard.investments
 
 ---
 
-**Last Updated:** 2026-09-08  
-**Version:** v1.6 (Universe money-scanner)  
+**Last Updated:** 2026-09-11  
+**Version:** v1.7 (Inline Chat pane)  
 **Status:** Not Pooli. No keys client-side. No trades. Import stays in-browser.

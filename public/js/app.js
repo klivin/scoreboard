@@ -3,6 +3,7 @@ import { AppController } from './controller.js';
 import { InvestmentsController } from './investments/controller.js';
 import { ForecastsController } from './forecasts/controller.js';
 import { ScannerController } from './scanner/controller.js';
+import { ChatController } from './chat/controller.js';
 
 const views = {
   chart: new ChartView('chart'),
@@ -38,5 +39,11 @@ const scanner = new ScannerController({
 });
 controller.scanner = scanner;
 
+const chat = new ChatController({
+  onLoadAsset: (payload) => controller.loadAsset(payload)
+});
+controller.chat = chat;
+
 controller.init();
 investments.init();
+chat.init();
