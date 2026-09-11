@@ -549,7 +549,7 @@ Clicking a scanner row sets `#ticker-input` (and hidden `#symbol-select`) and op
 
 **Status:** done (pane + live LLM wiring). Bullmania-style **Chat** tab: ask about any investment, get a short research summary plus tappable asset cards. Cards load the Overview chart. **Not financial advice. No keys, no orders, no custody. Not Pooli.**
 
-House Cursor agents stay grok-4.6. The **in-app** runtime is a server-side tool loop (`POST /api/chat`) using the same OpenAI-compatible function-calling path for **xAI** and **OpenAI**. Default live model is **`grok-4.6`** (public xAI id, verified against [xAI Grok 4.6 docs](https://docs.x.ai/developers/models/grok-4.6)). OpenAI default is `gpt-4o-mini`.
+House Cursor agents stay grok-4.6. The **in-app** runtime is a server-side tool loop (`POST /api/chat`) using the same OpenAI-compatible function-calling path for **xAI** and **OpenAI**. Default live model is **`grok-4.6`** (public xAI id, verified against [xAI Grok 4.6 docs](https://docs.x.ai/developers/models/grok-4.6)). OpenAI default is `gpt-4o-mini`. The OpenAI picker also lists GPT-5.6 family ids: `gpt-5.6-sol`, public alias `gpt-5.6` (routes to Sol), `gpt-5.6-terra`, `gpt-5.6-luna`, then the existing `gpt-4o-mini` / `gpt-4o` / `gpt-4.1-mini` options.
 
 **Never** put a key in the repo, PR body, or client JS. The Node server loads gitignored `.env` via a tiny zero-dep parser (`src/model/dotenv.js`). If no usable key is present, a deterministic **stub provider** still runs the same tools so the UI and tests work.
 
@@ -1126,7 +1126,7 @@ scoreboard.investments
 - Server tool loop: `resolve_assets` / `search_assets` / `get_chart_context` then structured `content[]`
 - Cards only from successful resolve; tap → `loadAsset` → Overview Load Data (`reloadSelected`)
 - Live xAI / OpenAI function calling via OpenAI-compatible `/chat/completions`; deterministic stub when no usable key
-- Default live model **`grok-4.6`** (xAI public id). OpenAI default `gpt-4o-mini`. In-app provider/model picker persists in `collections.settings` (no keys)
+- Default live model **`grok-4.6`** (xAI public id). OpenAI default `gpt-4o-mini`. In-app OpenAI picker also lists `gpt-5.6-sol`, public alias `gpt-5.6` (→ Sol), `gpt-5.6-terra`, and `gpt-5.6-luna`. Provider/model persist in `collections.settings` (no keys)
 - Zero-dep `.env` loader; canonical `SCOREBOARD_*` vars (legacy `XAI_API_KEY` / `GROK_API_KEY` / `OPENAI_API_KEY` aliases)
 - `/api/chat/status` returns `{ provider, hasLiveLlm, model }` never the key
 - Status: **done** — pane + production LLM wiring; no keys in repo

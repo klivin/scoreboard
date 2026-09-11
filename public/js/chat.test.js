@@ -3,7 +3,9 @@ import assert from 'node:assert';
 import {
   CHAT_SCHEMA_VERSION,
   CHAT_STORAGE_KEY,
+  CHAT_MODEL_OPTIONS,
   migrateChatState,
+  modelsForProvider,
   normalizeChatSettings
 } from './chat/schema.js';
 import { ChatStore, MemoryStorage } from './chat/store.js';
@@ -75,6 +77,50 @@ test('NFA banner is always in the chat pane chrome', () => {
   assert.match(withMsgs, /chat-nfa-banner/);
   assert.ok(withMsgs.includes(NFA_BANNER_TEXT));
   assert.match(withMsgs, /Live function-calling provider: xai · grok-4\.6/);
+});
+
+test('OpenAI chat picker lists GPT-5.6 family then existing 4o/4.1 options', () => {
+  assert.deepStrictEqual(CHAT_MODEL_OPTIONS.openai.map((row) => row.id), [
+    'gpt-5.6-sol',
+    'gpt-5.6',
+    'gpt-5.6-terra',
+    'gpt-5.6-luna',
+    'gpt-4o-mini',
+    'gpt-4o',
+    'gpt-4.1-mini'
+  ]);
+  assert.deepStrictEqual(CHAT_MODEL_OPTIONS.xai.map((row) => row.id), [
+    'grok-4.6',
+    'grok-4.5',
+    'grok-4'
+  ]);
+  assert.deepStrictEqual(modelsForProvider('openai').map((row) => row.label), [
+    'GPT-5.6 Sol',
+    'GPT-5.6 (alias → Sol)',
+    'GPT-5.6 Terra',
+    'GPT-5.6 Luna',
+    'gpt-4o-mini',
+    'gpt-4o',
+    'gpt-4.1-mini'
+  ]);
+  const html = buildChatPaneHtml({
+    messages: [],
+    settings: { provider: 'openai', model: 'gpt-5.6-sol' }
+  });
+  assert.match(html, /value="gpt-5\.6-sol"/);
+  assert.match(html, /GPT-5\.6 Sol/);
+  assert.match(html, /GPT-5\.6 \(alias → Sol\)/);
+  assert.match(html, /GPT-5\.6 Terra/);
+  assert.match(html, /GPT-5\.6 Luna/);
+  assert.match(html, /value="gpt-4o-mini"/);
+  assert.doesNotMatch(html, /value="grok-4\.6"/);
+  const xaiHtml = buildChatPaneHtml({
+    messages: [],
+    settings: { provider: 'xai', model: 'grok-4.6' }
+  });
+  assert.match(xaiHtml, /value="grok-4\.6"/);
+  assert.match(xaiHtml, /value="grok-4\.5"/);
+  assert.match(xaiHtml, /value="grok-4"/);
 });
 
 test('normalizeChatSettings drops key-like fields', () => {
