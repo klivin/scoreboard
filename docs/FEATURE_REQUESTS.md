@@ -415,7 +415,7 @@ curl -sS 'http://localhost:3000/api/series?symbol=BTC&interval=1h&sinceCursor=ok
 ```
 
 ### Daily last bar stuck on pack date (prefer live OKX ingest)
-**Status:** doing  
+**Status:** done  
 **Request:** Kevin (2026-09-11 PT): Daily last bar looks like ~Aug 31 while today is Sept 11. Hourly works fine. Incremental refresh should pull only the missing daily tail, same as BTC hourly. Free-text ticker UI is a separate follow-up — not this item.
 
 **Root cause (verified, do not re-derive):**
@@ -430,6 +430,17 @@ curl -sS 'http://localhost:3000/api/series?symbol=BTC&interval=1h&sinceCursor=ok
 4. Tests: series preference prefers fresher ingest over older pack; ETH adapters exist; idempotent second daily refresh uses watermark/`before=`. `npm test` passes.
 
 **Design:** `docs/WIKI.md` (Data Ingestion — series preference / live vs pack)
+
+**Verified (agent, 2026-09-11):** Seeded stagnant `indicators_daily.csv` ending **2026-08-31**. Old 1d path (`getDailyFromIndicators`) last bar stayed `2026-08-31T00:00:00.000Z`. After live OKX refresh + merge, `getSeries` last bars:
+
+| Series | Last timestamp (UTC) | Close |
+|---|---|---|
+| BTC 1d | **2026-09-11T16:00:00.000Z** | 77864 |
+| ETH 1d | **2026-09-11T16:00:00.000Z** | 2569.05 |
+| BTC 1h | 2026-09-11T16:00:00.000Z | 77855.7 |
+| ETH 1h | 2026-09-11T16:00:00.000Z | 2569.05 |
+
+Pack indicators still ended Aug 31 after refresh (ingest did not rewrite the CSV). Second daily refresh sent `before=1788883200000` for BTC and ETH (`instId=ETH-USDT-SWAP`); inserted 0, rowCount unchanged. `npm test` 159/159.
 
 **Not in this slice:** free-text ticker field.
 
