@@ -1094,6 +1094,10 @@ test('lastFiniteClose and start-date close never invent prices', () => {
   ];
   assert.strictEqual(lastFiniteClose(series).close, 12);
   assert.strictEqual(closeOnOrBeforeDate(series, '2026-09-10').close, 10);
+  assert.strictEqual(closeOnOrBeforeDate([
+    { date_utc: '2026-09-10', close: 10 },
+    { date_utc: '2026-09-11 13:30:00', close: 12 }
+  ], '2026-09-11').close, 12);
   assert.strictEqual(markFromIndicatorsPayload({ error: 'missing' }), null);
   assert.strictEqual(lastFiniteClose([]), null);
   assert.strictEqual(lastFiniteClose([{ close: null }]), null);

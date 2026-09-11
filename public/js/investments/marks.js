@@ -9,16 +9,20 @@ function finiteClose(row) {
   return Number.isFinite(close) ? close : null;
 }
 
+function rowDateUtc(row) {
+  if (!row) return null;
+  if (row.date_utc) return String(row.date_utc).slice(0, 10);
+  if (Number.isFinite(row.timestamp)) return new Date(row.timestamp).toISOString().slice(0, 10);
+  return null;
+}
+
 export function lastFiniteClose(series) {
   if (!Array.isArray(series)) return null;
   for (let i = series.length - 1; i >= 0; i -= 1) {
     const row = series[i];
     const close = finiteClose(row);
     if (close == null) continue;
-    const dateUtc = row.date_utc
-      || (Number.isFinite(row.timestamp)
-        ? new Date(row.timestamp).toISOString().slice(0, 10)
-        : null);
+    const dateUtc = rowDateUtc(row);
     return {
       close,
       timestamp: Number.isFinite(row.timestamp) ? row.timestamp : null,
@@ -34,10 +38,7 @@ export function closeOnOrBeforeDate(series, dateUtc) {
   for (const row of series) {
     const close = finiteClose(row);
     if (close == null) continue;
-    const rowDate = row.date_utc
-      || (Number.isFinite(row.timestamp)
-        ? new Date(row.timestamp).toISOString().slice(0, 10)
-        : null);
+    const rowDate = rowDateUtc(row);
     if (!rowDate || rowDate > dateUtc) continue;
     found = {
       close,

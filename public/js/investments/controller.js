@@ -131,7 +131,7 @@ export class InvestmentsController {
         });
         if (Number.isFinite(result.marks[symbol])) {
           nextMarks[symbol] = result.marks[symbol];
-          notes.push(`${symbol} ${result.marks[symbol]}`);
+          notes.push(`${symbol} ${result.marks[symbol].toFixed(2)}`);
         } else {
           notes.push(`${symbol} missing`);
         }
