@@ -1,7 +1,8 @@
 import {
   CHAT_STORAGE_KEY,
   emptyChatState,
-  migrateChatState
+  migrateChatState,
+  normalizeChatSettings
 } from './schema.js';
 
 export { CHAT_STORAGE_KEY };
@@ -75,6 +76,20 @@ export class ChatStore {
     return this.getState().collections.messages.slice();
   }
 
+  getSettings() {
+    return { ...this.getState().collections.settings };
+  }
+
+  setSettings(partial) {
+    const state = this.getState();
+    state.collections.settings = normalizeChatSettings({
+      ...state.collections.settings,
+      ...partial
+    });
+    this.save();
+    return this.getSettings();
+  }
+
   appendMessage(partial) {
     const state = this.getState();
     const message = {
@@ -90,7 +105,9 @@ export class ChatStore {
   }
 
   clear() {
+    const settings = this.getSettings();
     this.state = emptyChatState();
+    this.state.collections.settings = normalizeChatSettings(settings);
     this.save();
     return this.state;
   }

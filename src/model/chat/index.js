@@ -3,5 +3,12 @@ export { NFA_DISCLAIMER, sanitizeAssistantContent, cardsFromResolved } from './b
 export { buildCatalog, defaultCatalog, findCatalogMentions } from './catalog.js';
 export { resolveAssets, searchAssets, getChartContext, createToolRunner, TOOL_DEFINITIONS } from './tools.js';
 export { createStubProvider, stubIntent } from './stub.js';
-export { createChatProvider, detectChatProvider } from './provider.js';
+export {
+  createChatProvider,
+  detectChatProvider,
+  sanitizeChatOverride,
+  availableChatProviders,
+  DEFAULT_XAI_MODEL,
+  DEFAULT_OPENAI_MODEL
+} from './provider.js';
 export { runChatTurn, chatStatus } from './loop.js';

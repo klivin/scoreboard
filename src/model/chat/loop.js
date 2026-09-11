@@ -1,6 +1,11 @@
 import { sanitizeAssistantContent, NFA_DISCLAIMER } from './blocks.js';
 import { createToolRunner } from './tools.js';
-import { createChatProvider, detectChatProvider } from './provider.js';
+import {
+  availableChatProviders,
+  createChatProvider,
+  detectChatProvider,
+  sanitizeChatOverride
+} from './provider.js';
 
 export function incomingToLoopMessages(raw) {
   const list = Array.isArray(raw) ? raw : [];
@@ -64,6 +69,7 @@ export async function runChatTurn({
         toolTrace,
         resolved,
         provider: used.id,
+        model: used.model || null,
         disclaimer: NFA_DISCLAIMER
       };
     }
@@ -79,6 +85,7 @@ export async function runChatTurn({
       toolTrace,
       resolved,
       provider: used.id,
+      model: used.model || null,
       disclaimer: NFA_DISCLAIMER,
       error: error.message
     };
@@ -92,16 +99,24 @@ export async function runChatTurn({
     toolTrace,
     resolved,
     provider: used.id,
+    model: used.model || null,
     disclaimer: NFA_DISCLAIMER
   };
 }
 
-export function chatStatus(env = process.env) {
-  const detected = detectChatProvider(env);
+export function chatStatus(env = process.env, override = {}) {
+  const clean = sanitizeChatOverride(override);
+  const detected = detectChatProvider(env, clean);
+  const envDefault = detectChatProvider(env, {});
   return {
     provider: detected.id,
     hasLiveLlm: detected.id !== 'stub',
     model: detected.model || null,
-    disclaimer: NFA_DISCLAIMER
+    disclaimer: NFA_DISCLAIMER,
+    envDefault: {
+      provider: envDefault.id,
+      model: envDefault.model || null
+    },
+    availableProviders: availableChatProviders(env)
   };
 }

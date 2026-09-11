@@ -11,7 +11,7 @@ Scoreboard is a crypto market analysis and forecasting dashboard built with vani
 - Storage: Local JSON files (Firestore-ready via adapter)
 - Testing: Node.js native test runner
 
-**No keys. No trades. No Pooli.**
+**No keys in the client. No trades. No Pooli.** Optional Chat LLM keys stay on the Node server in gitignored `.env`.
 
 ---
 
@@ -547,9 +547,11 @@ Clicking a scanner row sets `#ticker-input` (and hidden `#symbol-select`) and op
 
 ## Inline Chat pane (research only)
 
-**Status:** doing. Bullmania-style **Chat** tab: ask about any investment, get a short research summary plus tappable asset cards. Cards load the Overview chart. **Not financial advice. No keys, no orders, no custody. Not Pooli.**
+**Status:** done (pane + live LLM wiring). Bullmania-style **Chat** tab: ask about any investment, get a short research summary plus tappable asset cards. Cards load the Overview chart. **Not financial advice. No keys, no orders, no custody. Not Pooli.**
 
-House Cursor agents stay grok-4.6. The **in-app** runtime is a server-side tool loop (`POST /api/chat`). If `OPENAI_API_KEY` or `XAI_API_KEY` / `GROK_API_KEY` is set on the process, that OpenAI-compatible function-calling endpoint is used. **Never** put a key in the repo or in client JS. If no key is present, a deterministic **stub provider** still runs the same tools so the UI and tests work.
+House Cursor agents stay grok-4.6. The **in-app** runtime is a server-side tool loop (`POST /api/chat`) using the same OpenAI-compatible function-calling path for **xAI** and **OpenAI**. Default live model is **`grok-4.6`** (public xAI id, verified against [xAI Grok 4.6 docs](https://docs.x.ai/developers/models/grok-4.6)). OpenAI default is `gpt-4o-mini`.
+
+**Never** put a key in the repo, PR body, or client JS. The Node server loads gitignored `.env` via a tiny zero-dep parser (`src/model/dotenv.js`). If no usable key is present, a deterministic **stub provider** still runs the same tools so the UI and tests work.
 
 ### Why a tool loop (not regex)
 
@@ -593,22 +595,42 @@ Do **not** add a second OKX watermark ingest here. Daily freshness is PR #13; ar
 
 ```
 scoreboard.chat
-  schemaVersion: 1
+  schemaVersion: 2
   namespace: chat
   collections.messages[]   # user + assistant turns (content blocks)
-  collections.settings     # reserved
+  collections.settings     # { provider: 'xai'|'openai'|null, model: string|null }
+                           # never api keys — stripped on migrate/save
 ```
 
-Unversioned arrays / `{ messages }` blobs migrate; history is never discarded. **Clear history** wipes the collection. The NFA banner is not optional — it is part of the pane chrome, not a dismissible toast.
+Unversioned arrays / `{ messages }` blobs migrate; history is never discarded. v1 payloads keep messages and gain settings. **Clear history** wipes messages and **keeps** the provider/model override. The NFA banner is not optional — it is part of the pane chrome, not a dismissible toast.
+
+In-app Chat settings (provider + model dropdowns) persist in `collections.settings`. `null` means “use server env default”. The client sends only those non-secret fields on `POST /api/chat` and `GET /api/chat/status`.
 
 ### API
 
 ```
-GET  /api/chat/status   # { provider: stub|openai|xai, hasLiveLlm }
-POST /api/chat          # { messages } → { provider, content, toolTrace, disclaimer }
+GET  /api/chat/status   # { provider, hasLiveLlm, model, envDefault, availableProviders }
+POST /api/chat          # { messages, provider?, model? } → { provider, model, content, toolTrace, disclaimer }
 ```
 
-Client never sees API keys. Optional env (server only): `OPENAI_API_KEY`, `OPENAI_BASE_URL`, `OPENAI_MODEL`, `XAI_API_KEY` or `GROK_API_KEY`, `XAI_BASE_URL`, `CHAT_MODEL`.
+Optional non-secret override (never keys): body `provider` / `model`, query `?provider=&model=`, or headers `X-Scoreboard-Chat-Provider` / `X-Scoreboard-Chat-Model`. Request override beats env when that provider has a usable key; otherwise the selected provider stays **stub**.
+
+Client never sees API keys. Server env (`.env`, gitignored):
+
+```
+# canonical
+SCOREBOARD_XAI_API_KEY=...
+SCOREBOARD_OPENAI_API_KEY=...
+SCOREBOARD_CHAT_PROVIDER=xai        # xai | openai; default xai when xAI key present
+SCOREBOARD_CHAT_MODEL=grok-4.6      # optional; default grok-4.6 (xAI) or gpt-4o-mini (OpenAI)
+SCOREBOARD_XAI_BASE_URL=https://api.x.ai/v1
+SCOREBOARD_OPENAI_BASE_URL=https://api.openai.com/v1
+
+# accepted aliases (legacy)
+XAI_API_KEY / GROK_API_KEY
+OPENAI_API_KEY
+XAI_BASE_URL / OPENAI_BASE_URL / CHAT_MODEL
+```
 
 ### Files
 
@@ -739,7 +761,7 @@ GET /api/forecast?symbol=BTC&horizon=weekly|monthly|7|30
 **Browser local stores (separate namespaces):**
 - `scoreboard.investments` — Investments tab (REAL / TRACKING)
 - `scoreboard.forecasts` — Forecasts tab cache + filter settings
-- `scoreboard.chat` — Chat tab history (`schemaVersion` + `collections.messages`)
+- `scoreboard.chat` — Chat tab history (`schemaVersion` 2 + `collections.messages` + `collections.settings` provider/model only; never keys)
 
 These server-side files are **not** used for brokerage imports. Investments use a separate browser namespace (`scoreboard.investments`).
 
@@ -922,12 +944,15 @@ PORT=3000
 STORE_TYPE=local  # or 'firestore'
 FIREBASE_CONFIG='{"apiKey":"..."}' # if STORE_TYPE=firestore
 # Chat (server-side only — never commit, never send to the browser)
-# OPENAI_API_KEY=...
-# OPENAI_BASE_URL=https://api.openai.com/v1
-# OPENAI_MODEL=gpt-4o-mini
-# XAI_API_KEY=...          # or GROK_API_KEY
-# XAI_BASE_URL=https://api.x.ai/v1
-# CHAT_MODEL=grok-4
+# .env is gitignored and loaded by src/model/dotenv.js (no dotenv npm dep)
+SCOREBOARD_XAI_API_KEY=...
+SCOREBOARD_CHAT_PROVIDER=xai
+SCOREBOARD_CHAT_MODEL=grok-4.6
+# optional
+SCOREBOARD_OPENAI_API_KEY=...
+SCOREBOARD_XAI_BASE_URL=https://api.x.ai/v1
+SCOREBOARD_OPENAI_BASE_URL=https://api.openai.com/v1
+# aliases still accepted: XAI_API_KEY / GROK_API_KEY / OPENAI_API_KEY
 ```
 
 ### File Structure
@@ -967,6 +992,7 @@ scoreboard/
 │   │   ├── okx-adapter.js
 │   │   ├── series.js
 │   │   ├── chat/          # Chat tools, stub, live provider
+│   │   ├── dotenv.js      # zero-dep .env loader (no secrets logged)
 │   │   ├── store.js
 │   │   └── store-adapter.js
 │   └── server.js
@@ -1096,12 +1122,14 @@ scoreboard.investments
 ## Changelog
 
 ### Inline Chat pane (research only)
-- Chat tab: schema-versioned `scoreboard.chat` history, always-visible NFA banner, Clear
+- Chat tab: schema-versioned `scoreboard.chat` history (`schemaVersion` 2), always-visible NFA banner, Clear
 - Server tool loop: `resolve_assets` / `search_assets` / `get_chart_context` then structured `content[]`
 - Cards only from successful resolve; tap → `loadAsset` → Overview Load Data (`reloadSelected`)
-- Live OpenAI-compatible function calling if a server key exists; otherwise deterministic stub
-- Localhost (2026-09-11): stub path verified — buyback cards, tap BNB sets Overview symbol, unknown ticker has no card
-- Status: **doing** — no keys in repo; PR #14 ticker field is present (`#ticker-input` + `setSelectedSymbol`)
+- Live xAI / OpenAI function calling via OpenAI-compatible `/chat/completions`; deterministic stub when no usable key
+- Default live model **`grok-4.6`** (xAI public id). OpenAI default `gpt-4o-mini`. In-app provider/model picker persists in `collections.settings` (no keys)
+- Zero-dep `.env` loader; canonical `SCOREBOARD_*` vars (legacy `XAI_API_KEY` / `GROK_API_KEY` / `OPENAI_API_KEY` aliases)
+- `/api/chat/status` returns `{ provider, hasLiveLlm, model }` never the key
+- Status: **done** — pane + production LLM wiring; no keys in repo
 
 ### Ticker text field (any crypto / stock)
 - Overview combo box replaced by ticker text input + Add / Load + optional recent chips
@@ -1202,5 +1230,5 @@ scoreboard.investments
 ---
 
 **Last Updated:** 2026-09-11  
-**Version:** v1.8 (Chat pane + ticker field + live daily merge)  
+**Version:** v1.9 (Chat live xAI/OpenAI + in-app model picker)  
 **Status:** Not Pooli. No keys client-side. No trades. Research/NFA chat. Import stays in-browser.
