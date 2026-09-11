@@ -14,7 +14,13 @@ import { runFullBacktest, loadBacktestSeries, formatBacktestReport } from '../mo
 import { loadScannerPayload } from '../model/scanner-build.js';
 import { evaluateTrackingFromBaseline, finiteOrNull } from '../model/scanner.js';
 import { scannerFlipsStore } from '../model/store-adapter.js';
-import { runChatTurn, chatStatus, createChatProvider, createToolRunner } from '../model/chat/index.js';
+import {
+  runChatTurn,
+  chatStatus,
+  createChatProvider,
+  createToolRunner,
+  sanitizeChatOverride
+} from '../model/chat/index.js';
 
 export function handleGetSeries(req, res) {
   const { symbol = 'BTC', interval = '1d', from, to, fields, since, sinceCursor } = req.query;
@@ -356,16 +362,27 @@ export function handleGetRefreshStatus(req, res) {
   }
 }
 
+function chatOverrideFromReq(req) {
+  const body = (req && req.body) || {};
+  const query = (req && req.query) || {};
+  const headers = (req && req.headers) || {};
+  return sanitizeChatOverride({
+    provider: body.provider || query.provider || headers['x-scoreboard-chat-provider'],
+    model: body.model || query.model || headers['x-scoreboard-chat-model']
+  });
+}
+
 export function handleGetChatStatus(req, res) {
-  res.json(chatStatus());
+  res.json(chatStatus(process.env, chatOverrideFromReq(req)));
 }
 
 export async function handlePostChat(req, res) {
   try {
     const messages = req.body && Array.isArray(req.body.messages) ? req.body.messages : [];
+    const override = chatOverrideFromReq(req);
     const result = await runChatTurn({
       messages,
-      provider: createChatProvider(),
+      provider: createChatProvider({ override }),
       tools: createToolRunner()
     });
     res.json(result);

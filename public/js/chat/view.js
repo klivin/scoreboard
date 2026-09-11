@@ -1,3 +1,5 @@
+import { modelsForProvider } from './schema.js';
+
 export const NFA_BANNER_TEXT = 'Not financial advice (NFA). Research / paper only — no orders, no keys, no custody. Cards appear only after tools resolve an asset. Tap a card to load Overview (same Load Data path).';
 
 const EXAMPLES = [
@@ -49,13 +51,51 @@ function renderMessage(message) {
   </article>`;
 }
 
+function optionHtml(value, label, selected) {
+  return `<option value="${escapeHtml(value)}"${selected ? ' selected' : ''}>${escapeHtml(label)}</option>`;
+}
+
+export function providerNoteText(model = {}) {
+  const provider = model.provider || 'stub';
+  const liveModel = model.model || null;
+  const hasLive = Boolean(model.hasLiveLlm);
+  if (!hasLive || provider === 'stub') {
+    return 'Using the local demo provider (stub — no usable LLM key for this selection). Add SCOREBOARD_XAI_API_KEY or SCOREBOARD_OPENAI_API_KEY to the server .env (gitignored). Never put keys in the repo or browser.';
+  }
+  const label = liveModel ? `${provider} · ${liveModel}` : provider;
+  return `Live function-calling provider: ${label} (server-side key only). In-app provider/model override is stored in this browser — keys stay on the server.`;
+}
+
+function renderSettings(model = {}) {
+  const settings = model.settings || {};
+  const selectedProvider = settings.provider || '';
+  const selectedModel = settings.model || '';
+  const extra = selectedModel || (model.envDefault && model.envDefault.model) || '';
+  const models = modelsForProvider(selectedProvider || (model.envDefault && model.envDefault.provider), extra);
+  return `<fieldset class="chat-settings" id="chat-settings">
+    <legend>Chat model</legend>
+    <label class="chat-setting">
+      <span>Provider</span>
+      <select id="chat-provider-select" ${model.busy ? 'disabled' : ''}>
+        ${optionHtml('', 'Server default', !selectedProvider)}
+        ${optionHtml('xai', 'xAI (Grok)', selectedProvider === 'xai')}
+        ${optionHtml('openai', 'OpenAI', selectedProvider === 'openai')}
+      </select>
+    </label>
+    <label class="chat-setting">
+      <span>Model</span>
+      <select id="chat-model-select" ${model.busy ? 'disabled' : ''}>
+        ${optionHtml('', 'Server default', !selectedModel)}
+        ${models.map((row) => optionHtml(row.id, row.label, selectedModel === row.id)).join('')}
+      </select>
+    </label>
+  </fieldset>`;
+}
+
 export function buildChatPaneHtml(model = {}) {
   const messages = model.messages || [];
-  const provider = model.provider || 'stub';
   const busy = Boolean(model.busy);
-  const providerNote = provider === 'stub'
-    ? 'Using the local demo provider (no LLM key). Set OPENAI_API_KEY or XAI_API_KEY / GROK_API_KEY on the server to enable live function calling. Never put keys in the repo or browser.'
-    : `Live function-calling provider: ${escapeHtml(provider)} (server-side key only).`;
+  const providerNote = providerNoteText(model);
 
   const log = messages.length
     ? messages.map(renderMessage).join('')
@@ -64,9 +104,10 @@ export function buildChatPaneHtml(model = {}) {
   return `<div class="chat-pane">
     <div class="chat-nfa-banner" id="chat-nfa-banner" data-testid="chat-nfa-banner">${escapeHtml(NFA_BANNER_TEXT)}</div>
     <div class="chat-toolbar">
-      <p class="chat-provider" id="chat-provider-note">${providerNote}</p>
+      ${renderSettings(model)}
       <button type="button" id="chat-clear-btn">Clear history</button>
     </div>
+    <p class="chat-provider" id="chat-provider-note">${escapeHtml(providerNote)}</p>
     <div id="chat-log" class="chat-log">${log}${busy ? '<p class="chat-busy">Researching…</p>' : ''}</div>
     <form id="chat-form" class="chat-form">
       <label class="chat-input-label" for="chat-input">Ask</label>

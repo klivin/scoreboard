@@ -5,7 +5,13 @@ import { resolveAssets, searchAssets, getChartContext, createToolRunner } from '
 import { sanitizeAssistantContent, cardsFromResolved } from './blocks.js';
 import { createStubProvider, stubIntent } from './stub.js';
 import { runChatTurn, chatStatus } from './loop.js';
-import { detectChatProvider } from './provider.js';
+import { createChatProvider } from './provider.js';
+import {
+  detectChatProvider,
+  sanitizeChatOverride,
+  DEFAULT_XAI_MODEL,
+  DEFAULT_OPENAI_MODEL
+} from './provider.js';
 
 const catalog = defaultCatalog();
 
@@ -136,6 +142,122 @@ test('chatStatus is stub without keys', () => {
   const status = chatStatus({});
   assert.strictEqual(status.provider, 'stub');
   assert.strictEqual(status.hasLiveLlm, false);
+  assert.strictEqual(status.model, null);
+  assert.deepStrictEqual(status.availableProviders, []);
+  assert.ok(!Object.prototype.hasOwnProperty.call(status, 'apiKey'));
   assert.strictEqual(detectChatProvider({ OPENAI_API_KEY: 'sk-test' }).id, 'openai');
   assert.strictEqual(detectChatProvider({ XAI_API_KEY: 'xai-test' }).id, 'xai');
+});
+
+test('detectChatProvider prefers SCOREBOARD_XAI_API_KEY and defaults grok-4.6', () => {
+  const detected = detectChatProvider({
+    SCOREBOARD_XAI_API_KEY: 'test-xai',
+    SCOREBOARD_OPENAI_API_KEY: 'test-openai'
+  });
+  assert.strictEqual(detected.id, 'xai');
+  assert.strictEqual(detected.model, DEFAULT_XAI_MODEL);
+  assert.strictEqual(DEFAULT_XAI_MODEL, 'grok-4.6');
+  assert.strictEqual(detected.baseUrl, 'https://api.x.ai/v1');
+});
+
+test('detectChatProvider accepts legacy XAI/GROK/OPENAI aliases', () => {
+  assert.strictEqual(detectChatProvider({ GROK_API_KEY: 'test-grok' }).id, 'xai');
+  assert.strictEqual(detectChatProvider({ XAI_API_KEY: 'test-xai' }).model, 'grok-4.6');
+  const openai = detectChatProvider({ OPENAI_API_KEY: 'test-openai' });
+  assert.strictEqual(openai.id, 'openai');
+  assert.strictEqual(openai.model, DEFAULT_OPENAI_MODEL);
+  assert.strictEqual(DEFAULT_OPENAI_MODEL, 'gpt-4o-mini');
+});
+
+test('SCOREBOARD_CHAT_PROVIDER and SCOREBOARD_CHAT_MODEL override defaults', () => {
+  const detected = detectChatProvider({
+    SCOREBOARD_XAI_API_KEY: 'test-xai',
+    SCOREBOARD_OPENAI_API_KEY: 'test-openai',
+    SCOREBOARD_CHAT_PROVIDER: 'openai',
+    SCOREBOARD_CHAT_MODEL: 'gpt-4o'
+  });
+  assert.strictEqual(detected.id, 'openai');
+  assert.strictEqual(detected.model, 'gpt-4o');
+});
+
+test('request provider/model beat env; request keys are ignored', () => {
+  const env = {
+    SCOREBOARD_XAI_API_KEY: 'test-xai',
+    SCOREBOARD_OPENAI_API_KEY: 'test-openai',
+    SCOREBOARD_CHAT_PROVIDER: 'xai',
+    SCOREBOARD_CHAT_MODEL: 'grok-4.6'
+  };
+  const detected = detectChatProvider(env, {
+    provider: 'openai',
+    model: 'gpt-4o-mini',
+    apiKey: 'should-never-be-used'
+  });
+  assert.strictEqual(detected.id, 'openai');
+  assert.strictEqual(detected.model, 'gpt-4o-mini');
+  assert.strictEqual(detected.apiKey, 'test-openai');
+  const ignored = sanitizeChatOverride({
+    provider: 'openai',
+    model: 'sk-proj-fake',
+    apiKey: 'sk-proj-fake'
+  });
+  assert.deepStrictEqual(ignored, { provider: 'openai', model: null });
+});
+
+test('request for a provider without a usable key stays stub', () => {
+  const status = chatStatus({ SCOREBOARD_XAI_API_KEY: 'test-xai' }, { provider: 'openai' });
+  assert.strictEqual(status.provider, 'stub');
+  assert.strictEqual(status.hasLiveLlm, false);
+  assert.deepStrictEqual(status.availableProviders, ['xai']);
+  assert.strictEqual(status.envDefault.provider, 'xai');
+  assert.strictEqual(status.envDefault.model, 'grok-4.6');
+});
+
+test('custom SCOREBOARD base URLs win over legacy aliases', () => {
+  const xai = detectChatProvider({
+    SCOREBOARD_XAI_API_KEY: 'test-xai',
+    SCOREBOARD_XAI_BASE_URL: 'https://example.test/xai/',
+    XAI_BASE_URL: 'https://ignored.example/xai'
+  });
+  assert.strictEqual(xai.baseUrl, 'https://example.test/xai');
+  const openai = detectChatProvider({
+    SCOREBOARD_OPENAI_API_KEY: 'test-openai',
+    SCOREBOARD_OPENAI_BASE_URL: 'https://example.test/openai/'
+  });
+  assert.strictEqual(openai.baseUrl, 'https://example.test/openai');
+});
+
+test('chatStatus never serializes key material', () => {
+  const status = chatStatus({
+    SCOREBOARD_XAI_API_KEY: 'super-secret-xai',
+    SCOREBOARD_OPENAI_API_KEY: 'super-secret-openai'
+  });
+  const json = JSON.stringify(status);
+  assert.ok(!json.includes('super-secret'));
+  assert.ok(!json.includes('apiKey'));
+  assert.strictEqual(status.provider, 'xai');
+  assert.strictEqual(status.hasLiveLlm, true);
+  assert.strictEqual(status.model, 'grok-4.6');
+});
+
+test('live provider posts OpenAI-compatible tools to the selected model', async () => {
+  const calls = [];
+  const provider = createChatProvider({
+    env: { SCOREBOARD_XAI_API_KEY: 'test-xai' },
+    override: { model: 'grok-4.6' },
+    fetchImpl: async (url, opts) => {
+      calls.push({ url, body: JSON.parse(opts.body) });
+      return {
+        ok: true,
+        text: async () => JSON.stringify({
+          choices: [{ message: { content: '{"content":[{"type":"text","markdown":"ok"}]}' } }]
+        })
+      };
+    }
+  });
+  assert.strictEqual(provider.id, 'xai');
+  await provider.complete([{ role: 'user', content: 'hello' }], [{ type: 'function', function: { name: 'resolve_assets' } }]);
+  assert.strictEqual(calls[0].url, 'https://api.x.ai/v1/chat/completions');
+  assert.strictEqual(calls[0].body.model, 'grok-4.6');
+  assert.strictEqual(calls[0].body.tool_choice, 'auto');
+  assert.ok(Array.isArray(calls[0].body.tools));
 });

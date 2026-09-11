@@ -86,6 +86,7 @@ export function createStubProvider({ catalog } = {}) {
   const cat = catalog || defaultCatalog();
   return {
     id: 'stub',
+    model: null,
     async complete(messages) {
       const tools = trailingToolResults(messages);
       const userText = lastUserText(messages);

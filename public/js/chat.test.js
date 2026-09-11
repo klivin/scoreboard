@@ -4,11 +4,11 @@ import {
   CHAT_SCHEMA_VERSION,
   CHAT_STORAGE_KEY,
   migrateChatState,
-  emptyChatState
+  normalizeChatSettings
 } from './chat/schema.js';
 import { ChatStore, MemoryStorage } from './chat/store.js';
-import { buildChatPaneHtml, NFA_BANNER_TEXT } from './chat/view.js';
-import { ChatController, cardFromDataset } from './chat/controller.js';
+import { buildChatPaneHtml, NFA_BANNER_TEXT, providerNoteText } from './chat/view.js';
+import { ChatController, cardFromDataset, postChat } from './chat/controller.js';
 import { loadPayloadFromCard, normalizeLoadPayload, applyLoadAssetToDom } from './load-asset.js';
 
 test('chat history schema migration wraps unversioned arrays', () => {
@@ -24,16 +24,25 @@ test('chat history schema migration wraps unversioned arrays', () => {
 });
 
 test('chat history schema migration keeps v1 messages', () => {
-  const current = emptyChatState();
-  current.collections.messages.push({
-    id: 'm1',
-    role: 'user',
-    createdAt: 1,
-    content: [{ type: 'text', markdown: 'load SKR' }]
-  });
+  const current = {
+    schemaVersion: 1,
+    namespace: 'chat',
+    collections: {
+      messages: [{
+        id: 'm1',
+        role: 'user',
+        createdAt: 1,
+        content: [{ type: 'text', markdown: 'load SKR' }]
+      }],
+      settings: { provider: 'xai', model: 'grok-4.6', apiKey: 'sk-should-drop' }
+    }
+  };
   const migrated = migrateChatState(current);
-  assert.strictEqual(migrated.schemaVersion, 1);
+  assert.strictEqual(migrated.schemaVersion, CHAT_SCHEMA_VERSION);
+  assert.strictEqual(CHAT_SCHEMA_VERSION, 2);
+  assert.strictEqual(migrated.migratedFrom, 1);
   assert.strictEqual(migrated.collections.messages[0].id, 'm1');
+  assert.deepStrictEqual(migrated.collections.settings, { provider: 'xai', model: 'grok-4.6' });
 });
 
 test('ChatStore persists after migrate', () => {
@@ -52,15 +61,55 @@ test('NFA banner is always in the chat pane chrome', () => {
   const html = buildChatPaneHtml({ messages: [], provider: 'stub' });
   assert.match(html, /chat-nfa-banner/);
   assert.ok(html.includes(NFA_BANNER_TEXT));
+  assert.match(html, /chat-provider-select/);
+  assert.match(html, /chat-model-select/);
   const withMsgs = buildChatPaneHtml({
     messages: [{
       role: 'assistant',
       content: [{ type: 'text', markdown: 'hi' }]
     }],
-    provider: 'xai'
+    provider: 'xai',
+    model: 'grok-4.6',
+    hasLiveLlm: true
   });
   assert.match(withMsgs, /chat-nfa-banner/);
   assert.ok(withMsgs.includes(NFA_BANNER_TEXT));
+  assert.match(withMsgs, /Live function-calling provider: xai · grok-4\.6/);
+});
+
+test('normalizeChatSettings drops key-like fields', () => {
+  assert.deepStrictEqual(normalizeChatSettings({
+    provider: 'openai',
+    model: 'gpt-4o-mini',
+    apiKey: 'sk-secret',
+    SCOREBOARD_XAI_API_KEY: 'xai-secret'
+  }), { provider: 'openai', model: 'gpt-4o-mini' });
+  assert.strictEqual(normalizeChatSettings({ model: 'sk-proj-nope' }).model, null);
+});
+
+test('ChatStore persists provider/model override without keys', () => {
+  const storage = new MemoryStorage();
+  const store = new ChatStore({ storage });
+  store.load();
+  store.setSettings({
+    provider: 'xai',
+    model: 'grok-4.6',
+    apiKey: 'sk-never-store'
+  });
+  store.appendMessage({ role: 'user', content: [{ type: 'text', markdown: 'hi' }] });
+  store.clear();
+  const again = new ChatStore({ storage });
+  assert.deepStrictEqual(again.getSettings(), { provider: 'xai', model: 'grok-4.6' });
+  assert.strictEqual(again.listMessages().length, 0);
+  const raw = JSON.parse(storage.getItem(CHAT_STORAGE_KEY));
+  assert.strictEqual(raw.schemaVersion, 2);
+  assert.ok(!JSON.stringify(raw).includes('sk-never-store'));
+  assert.ok(!Object.prototype.hasOwnProperty.call(raw.collections.settings, 'apiKey'));
+});
+
+test('provider note distinguishes stub vs live', () => {
+  assert.match(providerNoteText({ provider: 'stub', hasLiveLlm: false }), /local demo provider/i);
+  assert.match(providerNoteText({ provider: 'xai', model: 'grok-4.6', hasLiveLlm: true }), /Live function-calling provider: xai · grok-4\.6/);
 });
 
 test('tap/load handler receives load payload', async () => {
@@ -125,6 +174,48 @@ test('loadAsset seam writes Overview symbol + interval', () => {
   assert.strictEqual(interval.value, '1d');
   assert.strictEqual(ticker.value, 'ETH');
   assert.deepStrictEqual(calls.appended, ['ETH']);
+});
+
+test('ChatController applySettings persists override and refetches status', async () => {
+  const storage = new MemoryStorage();
+  const fetches = [];
+  const controller = new ChatController({
+    storage,
+    view: { root: null, render() {} },
+    fetchStatus: async (opts) => {
+      fetches.push(opts);
+      return {
+        provider: (opts && opts.provider) || 'xai',
+        model: (opts && opts.model) || 'grok-4.6',
+        hasLiveLlm: true,
+        envDefault: { provider: 'xai', model: 'grok-4.6' }
+      };
+    }
+  });
+  await controller.init();
+  await controller.applySettings({ provider: 'openai', model: 'gpt-4o-mini' });
+  assert.deepStrictEqual(controller.store.getSettings(), { provider: 'openai', model: 'gpt-4o-mini' });
+  assert.strictEqual(controller.provider, 'openai');
+  assert.strictEqual(controller.llmModel, 'gpt-4o-mini');
+  assert.deepStrictEqual(fetches.at(-1), { provider: 'openai', model: 'gpt-4o-mini' });
+});
+
+test('postChat sends provider/model override and never a key', async () => {
+  let body;
+  await postChat(
+    [{ role: 'user', content: [{ type: 'text', markdown: 'hi' }] }],
+    {
+      provider: 'xai',
+      model: 'grok-4.6',
+      fetchImpl: async (_url, opts) => {
+        body = JSON.parse(opts.body);
+        return { ok: true, json: async () => ({ provider: 'xai', content: [] }) };
+      }
+    }
+  );
+  assert.strictEqual(body.provider, 'xai');
+  assert.strictEqual(body.model, 'grok-4.6');
+  assert.ok(!Object.prototype.hasOwnProperty.call(body, 'apiKey'));
 });
 
 test('ChatController send uses tool-loop response cards', async () => {

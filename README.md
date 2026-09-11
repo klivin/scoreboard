@@ -14,7 +14,7 @@ Crypto market analysis and forecasting dashboard built with vanilla JavaScript M
   - Moving Averages (MA20 EMA, MA50/100/200 SMA)
   - Ichimoku Cloud (Tenkan, Kijun, Senkou A/B, Chikou)
   - Volume overlays
-- **Research Chat**: Tool-loop pane (resolve/search/chart-context). Tappable asset cards load Overview. NFA. Server-side LLM key optional; otherwise a local stub.
+- **Research Chat**: Tool-loop pane (resolve/search/chart-context). Tappable asset cards load Overview. NFA. Default live model is xAI `grok-4.6`; OpenAI is selectable. Server-side key via gitignored `.env`; otherwise a local stub.
 - **Data Management**: 
   - Local JSON store (Firestore-compatible schema)
   - CSV/JSON data ingestion
@@ -96,7 +96,18 @@ The application will be available at `http://localhost:3000`
 
 ### Optional in-app Chat LLM (server-side only)
 
-Do **not** paste keys into the repo or client JS. If the process has `OPENAI_API_KEY` or `XAI_API_KEY` / `GROK_API_KEY`, `POST /api/chat` uses that OpenAI-compatible function-calling API. Without a key, Chat still works via a deterministic local stub (same tools and cards). See `docs/WIKI.md` (Inline Chat pane).
+Do **not** paste keys into the repo or client JS. The server reads a gitignored `.env` (tiny zero-dep loader — no `dotenv` package). Without a usable key, Chat still works via a deterministic local stub (same tools and cards). In-app Chat settings can override provider/model in `localStorage` (`scoreboard.chat` schemaVersion 2); keys are never stored in the browser.
+
+```
+# .env (gitignored)
+SCOREBOARD_XAI_API_KEY=...
+SCOREBOARD_CHAT_PROVIDER=xai
+SCOREBOARD_CHAT_MODEL=grok-4.6
+# optional
+SCOREBOARD_OPENAI_API_KEY=...
+```
+
+Aliases still accepted: `XAI_API_KEY` / `GROK_API_KEY`, `OPENAI_API_KEY`. Optional base URLs: `SCOREBOARD_XAI_BASE_URL`, `SCOREBOARD_OPENAI_BASE_URL`. Default xAI model id is `grok-4.6` (current public xAI id). See `docs/WIKI.md` (Inline Chat pane).
 
 ### Development Mode (with auto-reload)
 

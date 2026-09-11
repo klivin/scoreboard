@@ -1,11 +1,31 @@
-export const CHAT_SCHEMA_VERSION = 1;
+export const CHAT_SCHEMA_VERSION = 2;
 export const CHAT_STORAGE_KEY = 'scoreboard.chat';
 export const CHAT_NAMESPACE = 'chat';
+
+export const CHAT_MODEL_OPTIONS = {
+  xai: [
+    { id: 'grok-4.6', label: 'Grok 4.6' },
+    { id: 'grok-4.5', label: 'Grok 4.5' },
+    { id: 'grok-4', label: 'Grok 4' }
+  ],
+  openai: [
+    { id: 'gpt-4o-mini', label: 'gpt-4o-mini' },
+    { id: 'gpt-4o', label: 'gpt-4o' },
+    { id: 'gpt-4.1-mini', label: 'gpt-4.1-mini' }
+  ]
+};
+
+export function emptyChatSettings() {
+  return {
+    provider: null,
+    model: null
+  };
+}
 
 export function emptyChatCollections() {
   return {
     messages: [],
-    settings: {}
+    settings: emptyChatSettings()
   };
 }
 
@@ -19,6 +39,36 @@ export function emptyChatState() {
 
 function asArray(value) {
   return Array.isArray(value) ? value : [];
+}
+
+function looksLikeSecretValue(value) {
+  const text = String(value || '').trim();
+  if (!text) return false;
+  if (/^(sk-|xai-|Bearer\s)/i.test(text)) return true;
+  if (/api[_-]?key/i.test(text)) return true;
+  return false;
+}
+
+export function normalizeChatProviderId(value) {
+  const id = String(value || '').trim().toLowerCase();
+  if (id === 'xai' || id === 'grok') return 'xai';
+  if (id === 'openai') return 'openai';
+  return null;
+}
+
+/**
+ * Persist provider/model only. Drop any key-like fields so localStorage
+ * never holds server secrets.
+ */
+export function normalizeChatSettings(raw) {
+  const out = emptyChatSettings();
+  if (!raw || typeof raw !== 'object') return out;
+  out.provider = normalizeChatProviderId(raw.provider);
+  if (typeof raw.model === 'string') {
+    const model = raw.model.trim();
+    if (model && !looksLikeSecretValue(model)) out.model = model;
+  }
+  return out;
 }
 
 function normalizeMessage(raw, index) {
@@ -57,13 +107,14 @@ function normalizeCollections(raw) {
     messages: asArray(raw.messages || raw.items || raw.history)
       .map((item, index) => normalizeMessage(item, index))
       .filter(Boolean),
-    settings: raw.settings && typeof raw.settings === 'object' ? { ...raw.settings } : {}
+    settings: normalizeChatSettings(raw.settings)
   };
 }
 
 /**
- * Migrate any persisted chat payload into schemaVersion 1.
+ * Migrate any persisted chat payload into the current schema.
  * Unversioned arrays and { messages } blobs are wrapped, never discarded.
+ * Settings are stripped of key-like fields on every load.
  */
 export function migrateChatState(raw) {
   if (raw == null) return emptyChatState();
@@ -91,9 +142,10 @@ export function migrateChatState(raw) {
         settings: raw.settings
       });
     }
-    version = 1;
+    version = CHAT_SCHEMA_VERSION;
   } else {
     collections = normalizeCollections(raw.collections);
+    version = CHAT_SCHEMA_VERSION;
   }
 
   return {
@@ -102,4 +154,19 @@ export function migrateChatState(raw) {
     collections,
     migratedFrom: raw.schemaVersion == null ? 0 : raw.schemaVersion
   };
+}
+
+export function modelsForProvider(provider, extraModel) {
+  const id = normalizeChatProviderId(provider);
+  const listed = id && CHAT_MODEL_OPTIONS[id]
+    ? CHAT_MODEL_OPTIONS[id].slice()
+    : [
+      ...CHAT_MODEL_OPTIONS.xai,
+      ...CHAT_MODEL_OPTIONS.openai
+    ];
+  const extra = typeof extraModel === 'string' ? extraModel.trim() : '';
+  if (extra && !listed.some((row) => row.id === extra)) {
+    listed.push({ id: extra, label: extra });
+  }
+  return listed;
 }

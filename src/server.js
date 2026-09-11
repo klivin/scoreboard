@@ -1,6 +1,7 @@
 import express from 'express';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { loadDotenv } from './model/dotenv.js';
 import {
   handleGetSeries,
   handleGetIndicators,
@@ -20,6 +21,8 @@ import {
   handleGetChatStatus,
   handlePostChat
 } from './controller/api.js';
+
+loadDotenv();
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
