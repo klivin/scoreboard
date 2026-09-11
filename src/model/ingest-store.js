@@ -50,18 +50,26 @@ export function rowsForAdapter(store, source, symbol, interval) {
   ));
 }
 
+function overlayKey(row, timestamp) {
+  const symbol = row && row.symbol ? String(row.symbol).toUpperCase() : 'BTC';
+  return `${symbol}|${timestamp}`;
+}
+
 export function overlayByTimestamp(packRows, storeRows) {
   const map = new Map();
   for (const row of packRows || []) {
     const timestamp = firstRowTimestamp(row);
     if (!Number.isFinite(timestamp)) continue;
-    map.set(timestamp, { ...row, timestamp });
+    map.set(overlayKey(row, timestamp), { ...row, timestamp });
   }
   for (const row of storeRows || []) {
     if (!row || !Number.isFinite(row.timestamp)) continue;
-    map.set(row.timestamp, { ...row });
+    map.set(overlayKey(row, row.timestamp), { ...row });
   }
-  return [...map.values()].sort((a, b) => a.timestamp - b.timestamp);
+  return [...map.values()].sort((a, b) => {
+    if (a.timestamp !== b.timestamp) return a.timestamp - b.timestamp;
+    return String(a.symbol || '').localeCompare(String(b.symbol || ''));
+  });
 }
 
 function setPackRows(pack, key, filename, rows, missingIfEmpty = false) {

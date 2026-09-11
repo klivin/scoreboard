@@ -9,6 +9,8 @@ import {
 } from './source-adapter.js';
 import { createOkxCandleAdapter, createOkxOiAdapter } from './okx-adapter.js';
 import { createCoinGeckoAdapter, createEtfAdapter } from './fallback-adapters.js';
+import { createStockAdapter } from './stock-adapter.js';
+import { normalizeTicker } from './ticker.js';
 import { rowsForAdapter, toStoreRows, upsertSeriesPage } from './ingest-store.js';
 import {
   errorLogStore as defaultErrorLogStore,
@@ -29,6 +31,44 @@ export function defaultAdapters(deps = {}) {
     createEtfAdapter({ symbol: 'ETH', ...deps }),
     createCoinGeckoAdapter(deps)
   ];
+}
+
+export function adaptersForTicker(symbol, deps = {}) {
+  const parsed = normalizeTicker(symbol);
+  if (!parsed.symbol) return [];
+
+  if (parsed.assetClass === 'stock') {
+    return [
+      createStockAdapter({ symbol: parsed.symbol, interval: '1h' }),
+      createStockAdapter({ symbol: parsed.symbol, interval: '1d' })
+    ];
+  }
+
+  const list = [
+    createOkxCandleAdapter({ symbol: parsed.symbol, interval: '1h', ...deps }),
+    createOkxCandleAdapter({ symbol: parsed.symbol, interval: '1d', ...deps })
+  ];
+
+  if (parsed.symbol === 'BTC') {
+    list.push(
+      createOkxOiAdapter({ symbol: 'BTC', interval: '1h', ...deps }),
+      createOkxOiAdapter({ symbol: 'BTC', interval: '1d', ...deps }),
+      createEtfAdapter({ symbol: 'BTC', ...deps }),
+      createCoinGeckoAdapter(deps)
+    );
+  } else if (parsed.symbol === 'ETH') {
+    list.push(
+      createOkxOiAdapter({ symbol: 'ETH', interval: '1h', ...deps }),
+      createOkxOiAdapter({ symbol: 'ETH', interval: '1d', ...deps }),
+      createEtfAdapter({ symbol: 'ETH', ...deps })
+    );
+  }
+
+  return list;
+}
+
+export function adapterKey(adapter) {
+  return `${adapter.id}:${String(adapter.symbol || '').toUpperCase()}:${adapter.interval || ''}`;
 }
 
 function matchesFilter(adapter, { source, symbol, interval } = {}) {
@@ -53,10 +93,9 @@ export function createRefreshRuntime({
   now = () => Date.now()
 } = {}) {
   const adapterList = adapters || defaultAdapters({ httpGet: http });
-  const state = {
-    running: false,
-    lastRunAt: null,
-    sources: adapterList.map((adapter) => ({
+
+  function idleSource(adapter) {
+    return {
       ...describeAdapter(adapter),
       status: 'idle',
       lastSuccessAt: null,
@@ -69,7 +108,26 @@ export function createRefreshRuntime({
       error: null,
       requestUrls: [],
       requestedSince: null
-    }))
+    };
+  }
+
+  function ensureSymbolAdapters(symbol) {
+    const extras = adaptersForTicker(symbol, { httpGet: http });
+    const existing = new Set(adapterList.map(adapterKey));
+    for (const adapter of extras) {
+      const key = adapterKey(adapter);
+      if (existing.has(key)) continue;
+      adapterList.push(adapter);
+      existing.add(key);
+      state.sources.push(idleSource(adapter));
+    }
+    return extras;
+  }
+
+  const state = {
+    running: false,
+    lastRunAt: null,
+    sources: adapterList.map((adapter) => idleSource(adapter))
   };
 
   function hydrateFromWatermarks(nowTs) {
@@ -130,6 +188,24 @@ export function createRefreshRuntime({
 
     try {
       const fetched = await adapter.fetchSince(cursor);
+      if (fetched && fetched.needsAdapter) {
+        return {
+          ...started,
+          status: 'missing',
+          fetched: 0,
+          upserted: 0,
+          rowCount: 0,
+          lastTimestamp: previous && previous.lastTimestamp,
+          lastSuccessAt: previous && previous.lastSuccessAt,
+          requestUrls: fetched.requestUrls || [],
+          requestedSince: fetched.requestedSince ?? since,
+          nextCursor: null,
+          mode: adapter.mode,
+          note: fetched.note || null,
+          needsAdapter: true,
+          missing: true
+        };
+      }
       const incoming = toStoreRows(fetched.rows || [], {
         source: adapter.id,
         symbol: adapter.symbol,
@@ -227,6 +303,16 @@ export function createRefreshRuntime({
     }
 
     state.running = true;
+    if (filter && filter.symbol) {
+      const parsed = normalizeTicker(filter.symbol);
+      const already = adapterList.some((adapter) => (
+        String(adapter.symbol || '').toUpperCase() === parsed.symbol
+        && (adapter.id === 'okx-candles' || adapter.id === 'stock-public')
+      ));
+      if (!already) {
+        ensureSymbolAdapters(filter.symbol);
+      }
+    }
     const selected = adapterList.filter((adapter) => matchesFilter(adapter, filter));
     const results = [];
 
@@ -260,7 +346,8 @@ export function createRefreshRuntime({
     adapters: adapterList,
     runRefresh,
     getStatus,
-    hydrateFromWatermarks
+    hydrateFromWatermarks,
+    ensureSymbolAdapters
   };
 }
 

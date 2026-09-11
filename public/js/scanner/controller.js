@@ -108,17 +108,14 @@ export class ScannerController {
   }
 
   openOverview(symbol) {
-    const select = document.getElementById('symbol-select');
-    if (select) {
-      const upper = String(symbol).toUpperCase();
-      const has = [...select.options].some((opt) => opt.value === upper);
-      if (!has) {
-        const opt = document.createElement('option');
-        opt.value = upper;
-        opt.textContent = upper;
-        select.appendChild(opt);
-      }
-      select.value = upper;
+    const upper = String(symbol || '').toUpperCase();
+    if (this.app && typeof this.app.setSelectedSymbol === 'function') {
+      this.app.setSelectedSymbol(upper);
+    } else {
+      const input = document.getElementById('ticker-input');
+      if (input) input.value = upper;
+      const hidden = document.getElementById('symbol-select');
+      if (hidden) hidden.value = upper;
     }
 
     document.querySelectorAll('.tab-btn').forEach((b) => b.classList.remove('active'));

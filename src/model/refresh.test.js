@@ -10,7 +10,7 @@ import {
 } from './source-adapter.js';
 import { createOkxCandleAdapter, createOkxOiAdapter, buildOkxCandlesUrl, okxInstId } from './okx-adapter.js';
 import { createEtfAdapter, createCoinGeckoAdapter, parseFarsideHtml } from './fallback-adapters.js';
-import { createRefreshRuntime, defaultAdapters } from './refresh.js';
+import { adaptersForTicker, createRefreshRuntime, defaultAdapters } from './refresh.js';
 import { SeriesModel } from './series.js';
 import { applySeriesStoreToPack } from './ingest-store.js';
 
@@ -407,4 +407,81 @@ test('applySeriesStoreToPack does not let ETH candles clobber BTC pack timestamp
   assert.ok(!pack.candles_1d.data.some((row) => row.close === 4300));
   assert.strictEqual(pack.live_candles.length, 2);
   assert.ok(pack.live_candles.some((row) => row.symbol === 'ETH'));
+});
+
+test('OKX candle URL for ETH uses ETH-USDT-SWAP and never a key', () => {
+  const url = buildOkxCandlesUrl({ interval: '1h', since: T0, instId: 'ETH-USDT-SWAP' });
+  assert.ok(url.includes('instId=ETH-USDT-SWAP'));
+  assert.ok(url.includes(`before=${T0}`));
+  assert.ok(!/key|secret|passphrase/i.test(url));
+});
+
+test('ETH adapter incremental fetch sends overlap cursor on second pull', async () => {
+  const page = [
+    candle(T0 + 2 * HOUR, 3500),
+    candle(T0 + HOUR, 3490),
+    candle(T0, 3480)
+  ];
+  const calls = [];
+  const httpGet = async (url) => {
+    calls.push(url);
+    return { ...jsonOk(page), url };
+  };
+  const adapter = createOkxCandleAdapter({ symbol: 'ETH', interval: '1h', httpGet, maxPages: 1 });
+  const first = await adapter.fetchSince(null);
+  assert.ok(calls[0].includes('instId=ETH-USDT-SWAP'));
+  assert.ok(!calls[0].includes('before='));
+  assert.strictEqual(first.rows.length, 3);
+  assert.strictEqual(first.rows[0].symbol, 'ETH');
+
+  const runtime = createRefreshRuntime({
+    httpGet,
+    watermarkStore: memoryStore(),
+    seriesStore: memoryStore(),
+    errorLogStore: memoryStore(),
+    universeStore: memoryStore(),
+    adapters: [createOkxCandleAdapter({ symbol: 'ETH', interval: '1h', httpGet, maxPages: 1 })]
+  });
+  const run1 = await runtime.runRefresh({ source: 'okx-candles', symbol: 'ETH', interval: '1h' });
+  const watermark = run1.ran[0].lastTimestamp;
+  const run2 = await runtime.runRefresh({ source: 'okx-candles', symbol: 'ETH', interval: '1h' });
+  assert.strictEqual(run2.ran[0].inserted, 0);
+  const expectedSince = overlapSince(watermark, '1h');
+  assert.ok(run2.ran[0].requestUrls[0].includes(`before=${expectedSince}`));
+  assert.ok(run2.ran[0].requestUrls[0].includes('instId=ETH-USDT-SWAP'));
+});
+
+test('OKX adapter falls back to spot when swap instrument is missing', async () => {
+  const calls = [];
+  const httpGet = async (url) => {
+    calls.push(url);
+    if (url.includes('INST-USDT-SWAP')) {
+      return {
+        ok: false,
+        status: 400,
+        text: JSON.stringify({ code: '51001', msg: 'Instrument ID does not exist' }),
+        url
+      };
+    }
+    return { ...jsonOk([candle(T0, 12)]), url };
+  };
+  const adapter = createOkxCandleAdapter({ symbol: 'INST', interval: '1d', httpGet, maxPages: 1 });
+  const result = await adapter.fetchSince(null);
+  assert.ok(calls[0].includes('INST-USDT-SWAP'));
+  assert.ok(calls[1].includes('instId=INST-USDT'));
+  assert.ok(!calls[1].includes('SWAP'));
+  assert.strictEqual(result.rows[0].close, 12);
+  assert.strictEqual(result.instId, 'INST-USDT');
+});
+
+test('adaptersForTicker builds OKX 1h+1d for SOL and stock stubs for AAPL', () => {
+  const sol = adaptersForTicker('sol');
+  assert.deepStrictEqual(
+    sol.filter((a) => a.id === 'okx-candles').map((a) => a.interval).sort(),
+    ['1d', '1h']
+  );
+  assert.ok(sol.every((a) => a.symbol === 'SOL'));
+  const aapl = adaptersForTicker('AAPL');
+  assert.ok(aapl.every((a) => a.id === 'stock-public'));
+  assert.deepStrictEqual(aapl.map((a) => a.interval).sort(), ['1d', '1h']);
 });

@@ -143,6 +143,51 @@ h1 {
   width: 150px;
 }
 
+.ticker-field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.ticker-recent {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: -8px 0 12px;
+}
+
+.ticker-chip {
+  padding: 4px 10px;
+  background: #eef2ff;
+  border: 1px solid #c7d2fe;
+  border-radius: 999px;
+  color: #3730a3;
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  box-shadow: none;
+  transform: none;
+}
+
+.ticker-chip:hover {
+  background: #c7d2fe;
+  transform: none;
+  box-shadow: none;
+}
+
+.ticker-chip.active {
+  background: #667eea;
+  color: #fff;
+  border-color: #667eea;
+}
+
+.ticker-hint {
+  margin: -4px 0 16px;
+  font-size: 0.85rem;
+  color: #666;
+}
+
 button {
   padding: 10px 20px;
   background: #667eea;

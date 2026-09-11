@@ -2,6 +2,12 @@ import { optionKeyFromToggleId, TOGGLE_OPTION_MAP } from './toggles.js';
 import { buildTransactionMarkers } from './investments/markers.js';
 import { getEnabledSignalStrategies, getSignalHorizon } from './signal-panel.js';
 import { loadAssetOnApp } from './load-asset.js';
+import {
+  normalizeTickerInput,
+  readRecentTickers,
+  rememberTicker,
+  renderRecentTickerChips
+} from './ticker.js';
 
 export class AppController {
   constructor(views) {
@@ -46,7 +52,9 @@ export class AppController {
   renderRefreshStatus(payload, heading = 'Source refresh') {
     const panel = document.getElementById('refresh-status');
     if (!panel) return;
-    const sources = payload && (payload.sources || payload.ran) ? (payload.sources || []) : [];
+    const sources = payload && payload.ran && payload.ran.length
+      ? payload.ran
+      : ((payload && payload.sources) || []);
     if (!sources.length) {
       panel.classList.add('hidden');
       return;
@@ -55,10 +63,16 @@ export class AppController {
     const rows = sources.map((src) => {
       const mode = src.mode === 'incremental' ? 'incremental' : 'bounded-overlap fallback';
       const age = this.formatAge(src.lastSuccessAgeMs);
-      const cls = src.status === 'error' ? 'src-error' : (src.mode === 'incremental' ? 'src-ok' : 'src-fallback');
+      const cls = src.status === 'error'
+        ? 'src-error'
+        : (src.status === 'missing' || src.needsAdapter
+          ? 'src-fallback'
+          : (src.mode === 'incremental' ? 'src-ok' : 'src-fallback'));
       const extra = src.error
         ? ` — ${src.error}`
-        : ` — last success ${age}${src.rowCount != null ? `, ${src.rowCount} rows` : ''}`;
+        : (src.note && (src.status === 'missing' || src.needsAdapter)
+          ? ` — ${src.note}`
+          : ` — last success ${age}${src.rowCount != null ? `, ${src.rowCount} rows` : ''}`);
       return `<li class="${cls}"><strong>${src.id}</strong> ${src.symbol} ${src.interval} (${mode})${extra}</li>`;
     }).join('');
 
@@ -78,7 +92,10 @@ export class AppController {
       }]
     }, 'Refreshing sources…');
 
-    const response = await fetch('/api/refresh', { method: 'POST' });
+    const symbol = this.getSelectedSymbol();
+    const params = new URLSearchParams();
+    if (symbol) params.set('symbol', symbol);
+    const response = await fetch(`/api/refresh?${params.toString()}`, { method: 'POST' });
     const result = await response.json().catch(() => ({}));
     if (!response.ok && !result.sources) {
       throw new Error(result.error || 'Refresh failed');
@@ -154,22 +171,32 @@ export class AppController {
   }
 
   async populateSymbols() {
-    const select = document.getElementById('symbol-select');
-    if (!select) return;
+    this.setSelectedSymbol(this.getSelectedSymbol() || 'BTC', { remember: true, render: true });
+  }
 
-    try {
-      const response = await fetch('/api/symbols');
-      if (!response.ok) return;
-      const result = await response.json();
-      const symbols = result.symbols && result.symbols.length ? result.symbols : ['BTC'];
-      const current = select.value || this.currentSymbol;
-      select.innerHTML = symbols.map((symbol) => (
-        `<option value="${symbol}"${symbol === current ? ' selected' : ''}>${symbol}</option>`
-      )).join('');
-      this.currentSymbol = select.value;
-    } catch (error) {
-      console.warn('Could not load symbol list:', error);
-    }
+  renderRecentTickers() {
+    renderRecentTickerChips(document.getElementById('ticker-recent'), {
+      symbols: readRecentTickers(),
+      active: this.getSelectedSymbol(),
+      onSelect: (symbol) => {
+        this.setSelectedSymbol(symbol);
+        this.reloadSelected();
+      }
+    });
+  }
+
+  setSelectedSymbol(symbol, { remember = true, render = true } = {}) {
+    const parsed = normalizeTickerInput(symbol);
+    const upper = parsed.symbol || String(symbol || '').toUpperCase();
+    if (!upper) return '';
+    this.currentSymbol = upper;
+    const input = document.getElementById('ticker-input');
+    if (input) input.value = upper;
+    const hidden = document.getElementById('symbol-select');
+    if (hidden) hidden.value = upper;
+    if (remember) rememberTicker(upper);
+    if (render) this.renderRecentTickers();
+    return upper;
   }
 
   syncChartOptionsFromCheckboxes() {
@@ -183,8 +210,11 @@ export class AppController {
   }
 
   getSelectedSymbol() {
-    const select = document.getElementById('symbol-select');
-    return (select && select.value) || this.currentSymbol || 'BTC';
+    const input = document.getElementById('ticker-input');
+    const hidden = document.getElementById('symbol-select');
+    const raw = (input && input.value) || (hidden && hidden.value) || this.currentSymbol || 'BTC';
+    const parsed = normalizeTickerInput(raw);
+    return parsed.symbol || this.currentSymbol || 'BTC';
   }
 
   getSelectedInterval() {
@@ -305,8 +335,7 @@ export class AppController {
     }
 
     const symbol = payload.symbol || this.getSelectedSymbol();
-    const select = document.getElementById('symbol-select');
-    if (select && symbol) select.value = symbol;
+    if (symbol) this.setSelectedSymbol(symbol);
 
     try {
       if (!this.views.chart.data || this.currentSymbol !== symbol) {
@@ -343,15 +372,27 @@ export class AppController {
   }
 
   /**
-   * Chat / ticker seam. Sets Overview symbol + interval, then the same
-   * Load Data path (`reloadSelected`). PR #14 can replace setSelectedSymbol.
+   * Chat / ticker seam. Sets Overview symbol + interval (syncs #ticker-input
+   * via setSelectedSymbol), then the same Load Data path (`reloadSelected`).
    */
   async loadAsset(payload) {
     return loadAssetOnApp(this, payload, typeof document !== 'undefined' ? document : null);
   }
 
+  addAndLoadTicker() {
+    const input = document.getElementById('ticker-input');
+    const parsed = normalizeTickerInput(input ? input.value : this.currentSymbol);
+    if (!parsed.symbol) {
+      this.showPageError('Enter a ticker such as ETH, SOL, or AAPL.');
+      return;
+    }
+    this.setSelectedSymbol(parsed.symbol);
+    return this.reloadSelected();
+  }
+
   async reloadSelected() {
-    const symbol = this.getSelectedSymbol();
+    const symbol = this.setSelectedSymbol(this.getSelectedSymbol(), { remember: true, render: true })
+      || this.getSelectedSymbol();
     const interval = this.getSelectedInterval();
 
     this.views.chart.setData(null);
@@ -393,9 +434,19 @@ export class AppController {
       loadBtn.addEventListener('click', () => this.reloadSelected());
     }
 
-    const symbolSelect = document.getElementById('symbol-select');
-    if (symbolSelect) {
-      symbolSelect.addEventListener('change', () => this.reloadSelected());
+    const tickerAdd = document.getElementById('ticker-add-btn');
+    if (tickerAdd) {
+      tickerAdd.addEventListener('click', () => this.addAndLoadTicker());
+    }
+
+    const tickerInput = document.getElementById('ticker-input');
+    if (tickerInput) {
+      tickerInput.addEventListener('keydown', (event) => {
+        if (event.key === 'Enter') {
+          event.preventDefault();
+          this.addAndLoadTicker();
+        }
+      });
     }
 
     const intervalSelect = document.getElementById('interval-select');
