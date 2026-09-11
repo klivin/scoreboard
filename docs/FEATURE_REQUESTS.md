@@ -691,7 +691,7 @@ Save as `synthetic-etrade-activity.csv`, `npm start`, Investments tab → choose
 ---
 
 ### Production Chat LLM (xAI Grok 4.6 + OpenAI)
-**Status:** doing  
+**Status:** done  
 **Request:** Wire the research-only Chat pane to real LLMs on Kevin’s Mac. Keep the existing tool loop + structured `asset_card`s. Default model: **Grok 4.6**. Easy swap to OpenAI. Never Pooli. Never commit keys.
 
 **Must ship:**
@@ -707,8 +707,10 @@ Save as `synthetic-etrade-activity.csv`, `npm start`, Investments tab → choose
 6. NFA banner + research-only system prompt stay. Settings never store API keys in localStorage.
 
 **Verification:**
-- `npm test` — env detection, alias keys, env vs request precedence, settings persist without keys, stub with no keys
-- Localhost Chat: picker + stub vs live note; NFA banner always visible
+- `npm test` — 223/223: env detection, alias keys, env vs request precedence, settings persist without keys, stub with no keys
+- Localhost UI (2026-09-11, this host — no LLM key): Chat tab NFA banner always visible + Chat model picker (Provider/Model). Server default → stub note naming `SCOREBOARD_XAI_API_KEY` / `SCOREBOARD_OPENAI_API_KEY`. Select xAI + Grok 4.6 still stub (honest). Load SKR → SKR card. Clear history keeps picker. `scoreboard.chat` schemaVersion 2 settings are `{ provider, model }` only — no keys. OpenAI + `gpt-4o-mini` still stub; tap SKR card → Overview ticker SKR + honest missing series. Live path unit-tested with mock fetch (`grok-4.6` + tools); this host had no key so live completions were not called.
+
+**Shipped:** zero-dep `.env` loader; canonical `SCOREBOARD_*` vars + legacy aliases; default xAI model id `grok-4.6`; in-app picker persists in `scoreboard.chat` `collections.settings`.
 
 **Design:** `docs/WIKI.md` (Inline Chat pane)
 
