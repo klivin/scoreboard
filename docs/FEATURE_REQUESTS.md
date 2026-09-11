@@ -616,8 +616,8 @@ Save as `synthetic-etrade-activity.csv`, `npm start`, Investments tab → choose
 - House cloud agents stay grok-4.6. In-app chat uses whatever tool-calling key is already on the server, else the stub.
 
 **Verification:**
-- `npm test` — resolve success → cards; unknown → no card; search → resolve → cards; tap/load payload; history schema migration; NFA banner present
-- Localhost Chat tab: banner + clear; stub answers buybacks / load SKR / compare MSTR vs BTC; tap loads Overview
+- `npm test` — 172/172: resolve success → cards; unknown → no card; search → resolve → cards; tap/load payload; history schema migration; NFA banner present
+- Localhost UI (2026-09-11, this host — no Flow pack, **stub** provider, no LLM key): Chat tab NFA banner + Clear + demo-provider note. “5 buyback coins” → BNB/MKR/OKB/LEO/KCS cards. Tap BNB → Overview symbol BNB + Load Data path (`No data available for BNB 1d` is honest — pack missing). History persisted across tabs. “load SKR” and “compare MSTR vs BTC” cards. `load ZZQXNOTATICKER` → text-only couldn’t resolve, no card. Clear empties transcript; banner stays.
 - No secrets in git
 
 **Design:** `docs/WIKI.md` (Inline Chat pane)

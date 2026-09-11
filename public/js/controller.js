@@ -468,6 +468,7 @@ export class AppController {
         } else if (tab === 'investments' && this.investments) {
           this.investments.refresh();
         } else if (tab === 'chat' && this.chat) {
+          this.clearPageError();
           this.chat.refresh();
         }
       });

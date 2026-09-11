@@ -1011,6 +1011,7 @@ scoreboard.investments
 - Server tool loop: `resolve_assets` / `search_assets` / `get_chart_context` then structured `content[]`
 - Cards only from successful resolve; tap → `loadAsset` → Overview Load Data (`reloadSelected`)
 - Live OpenAI-compatible function calling if a server key exists; otherwise deterministic stub
+- Localhost (2026-09-11): stub path verified — buyback cards, tap BNB sets Overview symbol, unknown ticker has no card
 - Status: **doing** — no keys in repo; PR #14 ticker field not required
 
 ### Forecasts tab (scored history, second product slice)
