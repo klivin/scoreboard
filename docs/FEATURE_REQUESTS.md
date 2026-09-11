@@ -619,8 +619,8 @@ Save as `synthetic-etrade-activity.csv`, `npm start`, Investments tab → choose
 6. Hide/bury the transaction ledger (`<details>`). No transaction dump as the primary view.
 
 **Verification:**
-- `npm test` — watch % / in-zone / pin; Positions Cost Basis ≠ Last Price; primary HTML is watchlist not ledger
-- Localhost: add CDNS or BTC + target + start=today → Refresh shows live mark and % vs start. Import synthetic Positions → FAKE1 cost $150, mark, unrealized $, %. In-zone row highlighted. Ledger is collapsed.
+- `npm test` — 259/259. Watch % / in-zone / pin; Positions Cost Basis ≠ Last Price; primary HTML is watchlist not ledger
+- Localhost UI (2026-09-11, synthetic Positions CSV only — not Kevin’s E*TRADE file): Watch / Track tab. Add CDNS target 300 start=today → Refresh: live mark **$289.37** (Yahoo ingest), % vs start, **buy zone** (mark ≤ 300). Import synthetic Positions → FAKE1 qty 6, cost **$150.00** (not $240 last-price), mark $40, unrealized **$90.00 / 60%**. FAKE3 no lot (no cost). Ledger collapsed in details. File stays in the browser.
 
 **Privacy:** never commit/upload Kevin’s private CSV. No brokerage keys. No live trades. Not Pooli.
 
