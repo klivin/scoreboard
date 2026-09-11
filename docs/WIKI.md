@@ -1150,7 +1150,7 @@ scoreboard.investments
 - % and unrealized vs live Price use that remaining basis
 - Edit cost on the parent remaining basis and on every fill sub-row, including imported lots (typo-fix, not locked)
 - Add auto-refresh from the venue PR is unchanged (`POST /api/refresh?symbol=&assetClass=`)
-- Status: **doing** in code + `npm test`
+- Status: **doing** in code + `npm test` (271)
 
 ### Watch / Track venue, Price, Remove, Bought/Sold
 - Instrument class `crypto` | `etf` | `equity` on every row; `BTC · coin` vs `IBIT · ETF` vs `CDNS · equity`
