@@ -393,7 +393,7 @@ test('Responses adapter maps tool_calls into the existing loop shape', async () 
                 ]
               })
             }]
-          })
+          }]
         })
       };
     }
