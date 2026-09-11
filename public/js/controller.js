@@ -52,7 +52,9 @@ export class AppController {
   renderRefreshStatus(payload, heading = 'Source refresh') {
     const panel = document.getElementById('refresh-status');
     if (!panel) return;
-    const sources = payload && (payload.sources || payload.ran) ? (payload.sources || []) : [];
+    const sources = payload && payload.ran && payload.ran.length
+      ? payload.ran
+      : ((payload && payload.sources) || []);
     if (!sources.length) {
       panel.classList.add('hidden');
       return;
