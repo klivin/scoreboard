@@ -632,6 +632,7 @@ Save as `synthetic-etrade-activity.csv`, `npm start`, Investments tab → choose
 **Verification:**
 - `npm test` — 267/267. Watch % / in-zone / pin; Positions Cost Basis ≠ Last Price; primary HTML is watchlist not ledger; CDNS equity Yahoo `assetClass`; IBIT/ETHA stay ETF; BTC coin and IBIT ETF marks stay distinct; Remove on every row; Bought leftover → sell zone; Add auto-refresh
 - Localhost UI (2026-09-11, synthetic Positions CSV only — not Kevin’s E*TRADE file): Watch / Track tab. Add CDNS target 300 start=today → Refresh: live mark **$289.37** (Yahoo ingest), % vs start, **buy zone** (mark ≤ 300). Import synthetic Positions → FAKE1 qty 6, cost **$150.00** (not $240 last-price), mark $40, unrealized **$90.00 / 60%**. FAKE3 no lot (no cost). Ledger collapsed in details. File stays in the browser.
+- Localhost (2026-09-11, this PR): Add CDNS equity target **280** auto-refreshed Price **$289.37** Yahoo as-of **2026-09-11** (no second click). IBIT ETF Price **$43.77** (not BTC-USDT). `BTC` mark key stayed empty on the ETF refresh. No private CSV.
 
 **Privacy:** never commit/upload Kevin’s private CSV. No brokerage keys. No live trades. Not Pooli.
 
