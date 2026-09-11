@@ -3,6 +3,16 @@
  * % and in-zone stay missing when mark or start/target is missing.
  */
 
+import {
+  defaultInstrumentClass,
+  formatInstrumentLabel,
+  markSymbolFor,
+  normalizeInstrumentClass,
+  resolveMarkTarget,
+  sameInstrument,
+  venueHint
+} from './instrument.js';
+
 export function finiteOrNull(value) {
   if (value === undefined || value === null || value === '') return null;
   const n = Number(value);
@@ -42,7 +52,7 @@ export function evaluateTargetZone({
   const t0 = finiteOrNull(target);
   const t1 = finiteOrNull(targetHigh);
   if (live == null || t0 == null) {
-    return { inZone: false, zone: null, badge: null };
+    return { inZone: false, zone: null, badge: null, pending: true };
   }
 
   const dir = normalizeDirection(direction);
@@ -64,11 +74,98 @@ export function evaluateTargetZone({
   return {
     inZone: hit,
     zone: hit ? zone : null,
-    badge: hit ? `${zone} zone` : null
+    badge: hit ? `${zone} zone` : null,
+    pending: false,
+    intended: `${zone} zone`
   };
 }
 
-export function resolveWatchEntry({ record, realPosition } = {}) {
+export function fillLotState(fills = []) {
+  let qty = 0;
+  let basis = 0;
+  const ordered = (fills || []).slice().sort((a, b) => {
+    const da = String(a.date || '');
+    const db = String(b.date || '');
+    if (da !== db) return da < db ? -1 : 1;
+    return Number(a.createdAt || 0) - Number(b.createdAt || 0);
+  });
+
+  for (const fill of ordered) {
+    const q = Math.abs(finiteOrNull(fill.quantity) ?? 0);
+    const p = finiteOrNull(fill.price);
+    if (q <= 0) continue;
+    const side = String(fill.side || fill.activityType || '').toUpperCase();
+    const isSell = side === 'SELL' || side === 'SOLD';
+    if (!isSell) {
+      qty += q;
+      if (p != null) basis += q * p;
+    } else if (qty > 0) {
+      const avg = basis / qty;
+      const take = Math.min(q, qty);
+      qty -= take;
+      basis -= avg * take;
+      if (qty <= 1e-12) {
+        qty = 0;
+        basis = 0;
+      }
+    }
+  }
+
+  return {
+    quantity: qty,
+    costBasis: qty > 0 ? basis : null,
+    averagePrice: qty > 0 ? basis / qty : null,
+    hasLot: qty > 1e-12
+  };
+}
+
+export function eventToFill(event) {
+  if (!event) return null;
+  const type = String(event.activityType || event.side || '').toLowerCase();
+  if (type !== 'buy' && type !== 'sell') return null;
+  if (!Number.isFinite(event.price)) return null;
+  const qty = finiteOrNull(event.quantity);
+  return {
+    id: event.id,
+    side: type === 'sell' ? 'SELL' : 'BUY',
+    date: event.activityDate || event.date || null,
+    quantity: qty == null ? 1 : qty,
+    price: event.price,
+    source: event.source || 'import',
+    createdAt: event.createdAt || 0
+  };
+}
+
+export function collectInstrumentFills(record, events = []) {
+  const fromRecord = Array.isArray(record && record.fills) ? record.fills.slice() : [];
+  const fromEvents = (events || [])
+    .filter((event) => sameInstrument(event, record))
+    .map(eventToFill)
+    .filter(Boolean);
+  return [...fromEvents, ...fromRecord];
+}
+
+export function fillVsMark(fill, mark) {
+  const price = finiteOrNull(fill && fill.price);
+  const live = finiteOrNull(mark);
+  const qty = finiteOrNull(fill && fill.quantity);
+  if (price == null || live == null) {
+    return { dollar: null, pct: null };
+  }
+  const qtyUse = qty == null ? 1 : qty;
+  return {
+    dollar: (live - price) * qtyUse,
+    pct: price === 0 ? null : (live - price) / price
+  };
+}
+
+export function resolveWatchEntry({ record, realPosition, lot = null } = {}) {
+  if (record && finiteOrNull(record.entryOverride) != null) {
+    return { entry: finiteOrNull(record.entryOverride), entryKind: 'cost' };
+  }
+  if (lot && lot.hasLot && finiteOrNull(lot.averagePrice) != null) {
+    return { entry: lot.averagePrice, entryKind: 'cost' };
+  }
   const realAvg = realPosition ? finiteOrNull(realPosition.averagePrice) : null;
   const realBasis = realPosition ? finiteOrNull(realPosition.costBasis) : null;
   const qty = realPosition ? finiteOrNull(realPosition.quantity) : null;
@@ -104,67 +201,182 @@ export function sortWatchRows(rows) {
     const aActive = a.status !== 'stopped';
     const bActive = b.status !== 'stopped';
     if (aActive !== bActive) return aActive ? -1 : 1;
-    return String(a.symbol || '').localeCompare(String(b.symbol || ''));
+    return String(a.displaySymbol || a.symbol || '').localeCompare(String(b.displaySymbol || b.symbol || ''));
   });
+}
+
+function lookupMark(markPrices, record) {
+  if (!markPrices || record && record.needsInstrumentClass) return null;
+  const markSymbol = markSymbolFor(record);
+  const cls = normalizeInstrumentClass(record.assetClass);
+  if (markSymbol && Object.prototype.hasOwnProperty.call(markPrices, markSymbol)) {
+    if ((cls === 'etf' || cls === 'equity') && isAmbiguousCoin(markSymbol)) return null;
+    return finiteOrNull(markPrices[markSymbol]);
+  }
+  if (record && record.symbol && Object.prototype.hasOwnProperty.call(markPrices, record.symbol)) {
+    if (cls !== 'crypto') return null;
+    return finiteOrNull(markPrices[record.symbol]);
+  }
+  return null;
+}
+
+function isAmbiguousCoin(symbol) {
+  const upper = String(symbol || '').trim().toUpperCase();
+  return upper === 'BTC' || upper === 'ETH';
+}
+
+function lookupMeta(markMeta, record) {
+  if (!markMeta) return null;
+  const markSymbol = markSymbolFor(record);
+  return (markSymbol && markMeta[markSymbol]) || (record.symbol && markMeta[record.symbol]) || null;
+}
+
+function matchingPosition(realPositions, record) {
+  return (realPositions || []).find((position) => sameInstrument(position, record)) || null;
+}
+
+function decorateFills(fills, mark) {
+  return (fills || []).map((fill) => {
+    const vs = fillVsMark(fill, mark);
+    return {
+      ...fill,
+      vsDollar: vs.dollar,
+      vsPct: vs.pct
+    };
+  });
+}
+
+export function buildWatchRow(record, {
+  realPositions = [],
+  markPrices = {},
+  markMeta = {},
+  events = []
+} = {}) {
+  const assetClass = record.needsInstrumentClass
+    ? null
+    : (normalizeInstrumentClass(record.assetClass) || defaultInstrumentClass(record.symbol));
+  const enriched = { ...record, assetClass, markSymbol: markSymbolFor({ ...record, assetClass }) };
+  const real = matchingPosition(realPositions, enriched);
+  const fills = collectInstrumentFills(enriched, events);
+  const lot = fillLotState(fills);
+  const hasLot = lot.hasLot || Boolean(real && finiteOrNull(real.quantity) > 0);
+  const mark = lookupMark(markPrices, enriched);
+  const meta = lookupMeta(markMeta, enriched);
+  const { entry, entryKind } = resolveWatchEntry({ record: enriched, realPosition: real, lot });
+  const direction = normalizeDirection(record.direction);
+  const returnPct = watchReturnPct({ startMark: entry, mark, direction });
+  const zone = evaluateTargetZone({
+    mark,
+    target: record.targetPrice,
+    targetHigh: record.targetHigh,
+    direction,
+    hasRealLot: hasLot
+  });
+  const target = resolveMarkTarget(enriched);
+
+  return {
+    id: record.id,
+    symbol: enriched.symbol,
+    displaySymbol: target.markSymbol || enriched.symbol,
+    listedSymbol: record.listedSymbol || record.symbol,
+    assetClass,
+    yahooTicker: record.yahooTicker || null,
+    markSymbol: enriched.markSymbol,
+    venue: venueHint(assetClass),
+    label: formatInstrumentLabel(enriched),
+    startDate: record.startDate || null,
+    entry,
+    entryKind,
+    mark,
+    markAsOf: meta && (meta.dateUtc || meta.asOf) || null,
+    markAsOfTs: meta && meta.timestamp ? meta.timestamp : null,
+    returnPct,
+    target: finiteOrNull(record.targetPrice),
+    targetHigh: finiteOrNull(record.targetHigh),
+    direction,
+    inZone: zone.inZone,
+    zone: zone.zone,
+    zoneBadge: zone.badge,
+    zonePending: zone.pending,
+    status: record.status || 'active',
+    hasRealLot: hasLot,
+    lotQty: lot.hasLot ? lot.quantity : (real ? real.quantity : null),
+    needsInstrumentClass: Boolean(record.needsInstrumentClass) || target.unresolved,
+    fills: decorateFills(fills, mark),
+    adapter: target.adapter,
+    canRemove: true
+  };
 }
 
 export function buildWatchRows({
   tracking = [],
   realPositions = [],
-  markPrices = {}
+  markPrices = {},
+  markMeta = {},
+  events = []
 } = {}) {
-  const realBySymbol = {};
+  const rows = (tracking || []).filter(Boolean).map((record) => buildWatchRow(record, {
+    realPositions,
+    markPrices,
+    markMeta,
+    events
+  }));
+
   for (const position of realPositions || []) {
-    if (position && position.symbol) realBySymbol[position.symbol] = position;
-  }
-
-  const rows = (tracking || []).filter(Boolean).map((record) => {
-    const symbol = record.symbol ? String(record.symbol).toUpperCase() : null;
-    const real = symbol ? realBySymbol[symbol] : null;
-    const mark = symbol && Object.prototype.hasOwnProperty.call(markPrices, symbol)
-      ? finiteOrNull(markPrices[symbol])
-      : null;
-    const { entry, entryKind } = resolveWatchEntry({ record, realPosition: real });
-    const direction = normalizeDirection(record.direction);
-    const returnPct = watchReturnPct({ startMark: entry, mark, direction });
-    const zone = evaluateTargetZone({
-      mark,
-      target: record.targetPrice,
-      targetHigh: record.targetHigh,
-      direction,
-      hasRealLot: Boolean(real && finiteOrNull(real.quantity) > 0)
-    });
-
-    return {
-      id: record.id,
-      symbol,
-      startDate: record.startDate || null,
-      entry,
-      entryKind,
-      mark,
-      returnPct,
-      target: finiteOrNull(record.targetPrice),
-      targetHigh: finiteOrNull(record.targetHigh),
-      direction,
-      inZone: zone.inZone,
-      zone: zone.zone,
-      zoneBadge: zone.badge,
-      status: record.status || 'active',
-      badge: 'TRACKING',
-      hasRealLot: Boolean(real && finiteOrNull(real.quantity) > 0)
+    if (!position || !position.symbol) continue;
+    const covered = rows.some((row) => sameInstrument(row, position));
+    if (covered) continue;
+    const assetClass = normalizeInstrumentClass(position.assetClass)
+      || defaultInstrumentClass(position.symbol);
+    const synthetic = {
+      id: `real_${assetClass}_${position.symbol}`,
+      symbol: position.symbol,
+      listedSymbol: position.listedSymbol || position.symbol,
+      assetClass,
+      yahooTicker: position.yahooTicker || (assetClass === 'etf' ? position.symbol : null),
+      markSymbol: markSymbolFor({ ...position, assetClass }),
+      needsInstrumentClass: Boolean(position.needsInstrumentClass),
+      startDate: position.openDate || null,
+      baselinePrice: finiteOrNull(position.averagePrice),
+      startMark: finiteOrNull(position.averagePrice),
+      targetPrice: null,
+      targetHigh: null,
+      direction: 'long',
+      status: 'active',
+      source: 'import',
+      fills: []
     };
-  });
+    rows.push(buildWatchRow(synthetic, {
+      realPositions,
+      markPrices,
+      markMeta,
+      events
+    }));
+  }
 
   return sortWatchRows(rows);
 }
 
-export function collectWatchSymbols({ tracking = [], realPositions = [] } = {}) {
-  const symbols = new Set();
-  for (const record of tracking || []) {
-    if (record && record.symbol) symbols.add(String(record.symbol).toUpperCase());
-  }
-  for (const position of realPositions || []) {
-    if (position && position.symbol) symbols.add(String(position.symbol).toUpperCase());
-  }
-  return [...symbols];
+export function collectWatchTargets({ tracking = [], realPositions = [] } = {}) {
+  const seen = new Set();
+  const targets = [];
+  const push = (record) => {
+    const target = resolveMarkTarget(record);
+    if (!target.ok || target.unresolved || !target.markSymbol) return;
+    const key = `${target.assetClass}:${target.markSymbol}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    targets.push({
+      symbol: target.markSymbol,
+      markSymbol: target.markSymbol,
+      assetClass: target.assetClass,
+      adapter: target.adapter,
+      startDate: record.startDate || null
+    });
+  };
+  for (const record of tracking || []) push(record);
+  for (const position of realPositions || []) push(position);
+  return targets;
 }
+
+export { formatInstrumentLabel, markSymbolFor, sameInstrument, resolveMarkTarget };

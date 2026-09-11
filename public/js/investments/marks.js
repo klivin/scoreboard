@@ -3,6 +3,8 @@
  * Never invents a price. Missing series → missing mark.
  */
 
+import { refreshAssetClassParam, resolveMarkTarget } from './instrument.js';
+
 function finiteClose(row) {
   if (!row || row.close === undefined || row.close === null || row.close === '') return null;
   const close = Number(row.close);
@@ -54,58 +56,86 @@ export function markFromIndicatorsPayload(payload) {
   return lastFiniteClose(payload.data || payload.indicators || []);
 }
 
+function missingResult(symbol, assetClass, error) {
+  return {
+    symbol: symbol || null,
+    markSymbol: symbol || null,
+    assetClass: assetClass || null,
+    mark: null,
+    startClose: null,
+    asOf: null,
+    lastDateUtc: null,
+    timestamp: null,
+    series: [],
+    error: error || 'missing'
+  };
+}
+
 /**
- * Same path as Overview Load Data: POST /api/refresh?symbol= then GET /api/indicators.
- * Returns { symbol, mark, startClose, series, error } — mark is null when the source has no close.
+ * Same path as Overview Load Data: POST /api/refresh?symbol=&assetClass= then GET /api/indicators.
+ * ETF/equity → Yahoo. Crypto → OKX. Unresolved coin-as-ETF does not fetch spot.
  */
 export async function fetchSymbolMark(symbol, options = {}) {
   const fetchImpl = options.fetchImpl || (typeof fetch === 'function' ? fetch : null);
   const interval = options.interval || '1d';
   const startDate = options.startDate || null;
-  const upper = String(symbol || '').trim().toUpperCase();
-  if (!upper || !fetchImpl) {
-    return { symbol: upper || null, mark: null, startClose: null, series: [], error: 'missing' };
+  const target = resolveMarkTarget({
+    symbol,
+    assetClass: options.assetClass,
+    yahooTicker: options.yahooTicker,
+    markSymbol: options.markSymbol,
+    needsInstrumentClass: options.needsInstrumentClass
+  });
+  const markSymbol = target.markSymbol || String(symbol || '').trim().toUpperCase();
+  if (!markSymbol || !fetchImpl) {
+    return missingResult(markSymbol, target.assetClass, 'missing');
+  }
+  if (!target.ok || target.unresolved) {
+    return missingResult(markSymbol, target.assetClass, 'pick venue — coin spot not used');
   }
 
+  const refreshParams = new URLSearchParams({ symbol: markSymbol, interval });
+  const cls = refreshAssetClassParam(target.assetClass);
+  if (cls) refreshParams.set('assetClass', cls);
+
   try {
-    await fetchImpl(`/api/refresh?symbol=${encodeURIComponent(upper)}`, { method: 'POST' });
+    await fetchImpl(`/api/refresh?${refreshParams.toString()}`, { method: 'POST' });
   } catch {
     // Refresh failure still tries cached indicators; do not invent.
   }
 
   try {
-    const response = await fetchImpl(
-      `/api/indicators?symbol=${encodeURIComponent(upper)}&interval=${encodeURIComponent(interval)}`
-    );
+    const indicatorParams = new URLSearchParams({
+      symbol: markSymbol,
+      interval
+    });
+    const response = await fetchImpl(`/api/indicators?${indicatorParams.toString()}`);
     const payload = await response.json().catch(() => ({}));
     if (!response.ok || payload.error) {
-      return {
-        symbol: upper,
-        mark: null,
-        startClose: null,
-        series: [],
-        error: payload.error || `No data for ${upper}`
-      };
+      return missingResult(markSymbol, target.assetClass, payload.error || `No data for ${markSymbol}`);
     }
     const series = Array.isArray(payload.data) ? payload.data : [];
     const last = lastFiniteClose(series);
     const start = startDate ? closeOnOrBeforeDate(series, startDate) : null;
     return {
-      symbol: upper,
+      symbol: markSymbol,
+      markSymbol,
+      assetClass: target.assetClass,
+      adapter: target.adapter,
       mark: last ? last.close : null,
       startClose: start ? start.close : null,
+      asOf: last ? last.dateUtc : null,
       lastDateUtc: last ? last.dateUtc : null,
+      timestamp: last ? last.timestamp : null,
       series,
       error: last ? null : 'missing'
     };
   } catch (error) {
-    return {
-      symbol: upper,
-      mark: null,
-      startClose: null,
-      series: [],
-      error: error && error.message ? error.message : 'missing'
-    };
+    return missingResult(
+      markSymbol,
+      target.assetClass,
+      error && error.message ? error.message : 'missing'
+    );
   }
 }
 
@@ -113,11 +143,39 @@ export async function fetchMarksForSymbols(symbols, options = {}) {
   const marks = {};
   const startCloses = {};
   const errors = {};
+  const meta = {};
   for (const symbol of symbols || []) {
     const result = await fetchSymbolMark(symbol, options);
-    if (Number.isFinite(result.mark)) marks[result.symbol] = result.mark;
-    if (Number.isFinite(result.startClose)) startCloses[result.symbol] = result.startClose;
-    if (result.error) errors[result.symbol] = result.error;
+    const key = result.markSymbol || result.symbol;
+    if (Number.isFinite(result.mark)) marks[key] = result.mark;
+    if (Number.isFinite(result.startClose)) startCloses[key] = result.startClose;
+    if (result.error) errors[key] = result.error;
+    if (result.asOf || result.timestamp) {
+      meta[key] = { dateUtc: result.asOf, timestamp: result.timestamp, asOf: result.asOf };
+    }
   }
-  return { marks, startCloses, errors };
+  return { marks, startCloses, errors, meta };
+}
+
+export async function fetchMarksForTargets(targets, options = {}) {
+  const marks = {};
+  const startCloses = {};
+  const errors = {};
+  const meta = {};
+  for (const target of targets || []) {
+    const result = await fetchSymbolMark(target.markSymbol || target.symbol, {
+      ...options,
+      assetClass: target.assetClass,
+      markSymbol: target.markSymbol || target.symbol,
+      startDate: target.startDate || options.startDate || null
+    });
+    const key = result.markSymbol || result.symbol;
+    if (Number.isFinite(result.mark)) marks[key] = result.mark;
+    if (Number.isFinite(result.startClose)) startCloses[key] = result.startClose;
+    if (result.error) errors[key] = result.error;
+    if (result.asOf || result.timestamp) {
+      meta[key] = { dateUtc: result.asOf, timestamp: result.timestamp, asOf: result.asOf };
+    }
+  }
+  return { marks, startCloses, errors, meta };
 }

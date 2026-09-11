@@ -602,6 +602,17 @@ Save as `synthetic-etrade-activity.csv`, `npm start`, Investments tab → choose
 **Status:** doing  
 **Request:** Kevin does not like the TRACKING / Investments screen. Missing useful tracking tools. Rewrite so **WATCH / TRACK rows** are the primary UI (not a fill/ledger dump). Useful for deciding **open vs close**. Real E*TRADE positions stay secondary and distinct.
 
+**Kevin follow-up (Mac screenshot + venue, same PR):**
+1. **Price** (was Live mark) + as-of from last ingest close. Auto-refresh on Add so CDNS Yahoo fills without a second click. Never invent prices.
+2. **Venue/class on every row:** `crypto` | `etf` | `equity`. Same ticker may exist twice if class differs (`BTC · coin` vs `IBIT · ETF`). Add form picks class (default OKX-known → crypto, else equity). ETF requires a Yahoo ticker (IBIT, FBTC, ETHA, FETH, …) — never silently use $77k coin vs ~$28 ETF cost.
+3. **Import:** keep the E*TRADE listed ticker + etf/equity. Do not collapse IBIT/FBTC/ETHA → OKX BTC/ETH. Bare BTC/ETH from a brokerage file is unresolved until the user picks coin vs ETF.
+4. **Target persists** on the row just added (upsert same instrument; do not drop target).
+5. **Zone:** buy zone / sell zone / — (— until Price and target exist). Long + leftover lot → sell zone when Price ≥ target; full sell → buy zone again.
+6. **No TRACKING badge** on every watch row.
+7. **Remove on every row** (watch and imported REAL lots). No “history kept” dead-end. Confirm; default drop fills.
+8. **Bought / Sold** on the parent watch row (qty optional, price defaults to Price, date defaults today). Per-symbol fill **sub-rows** under that parent — not a resurrected global ledger as the primary screen.
+9. **Edit cost/entry** on every row.
+
 **Verified before the rewrite (do not re-guess):**
 1. UI was ledger-first: REAL section listed every imported transaction; watch/start-track was buried under paper BUY/SELL.
 2. Mark and Unrealized were always `missing` in the UI — `InvestmentsController.markPrices` stayed `{}` and was never filled from Overview ingest.
@@ -619,8 +630,9 @@ Save as `synthetic-etrade-activity.csv`, `npm start`, Investments tab → choose
 6. Hide/bury the transaction ledger (`<details>`). No transaction dump as the primary view.
 
 **Verification:**
-- `npm test` — 259/259. Watch % / in-zone / pin; Positions Cost Basis ≠ Last Price; primary HTML is watchlist not ledger
+- `npm test` — 267/267. Watch % / in-zone / pin; Positions Cost Basis ≠ Last Price; primary HTML is watchlist not ledger; CDNS equity Yahoo `assetClass`; IBIT/ETHA stay ETF; BTC coin and IBIT ETF marks stay distinct; Remove on every row; Bought leftover → sell zone; Add auto-refresh
 - Localhost UI (2026-09-11, synthetic Positions CSV only — not Kevin’s E*TRADE file): Watch / Track tab. Add CDNS target 300 start=today → Refresh: live mark **$289.37** (Yahoo ingest), % vs start, **buy zone** (mark ≤ 300). Import synthetic Positions → FAKE1 qty 6, cost **$150.00** (not $240 last-price), mark $40, unrealized **$90.00 / 60%**. FAKE3 no lot (no cost). Ledger collapsed in details. File stays in the browser.
+- Localhost (2026-09-11, this PR): Add CDNS equity target **280** auto-refreshed Price **$289.37** Yahoo as-of **2026-09-11** (no second click). IBIT ETF Price **$43.77** (not BTC-USDT). `BTC` mark key stayed empty on the ETF refresh. No private CSV.
 
 **Privacy:** never commit/upload Kevin’s private CSV. No brokerage keys. No live trades. Not Pooli.
 

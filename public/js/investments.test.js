@@ -26,6 +26,15 @@ import { InvestmentsStore, MemoryStorage } from './investments/store.js';
 import { computeLotsAndPnl, formatMissing } from './investments/lots.js';
 import { buildTransactionMarker, buildTransactionMarkers, formatMarkerDetail } from './investments/markers.js';
 import { startTrackingInput, trackingForwardPerformance, validatePaperTrade } from './investments/tracking.js';
+import { InvestmentsController } from './investments/controller.js';
+import {
+  classifyImportedInstrument,
+  defaultInstrumentClass,
+  formatInstrumentLabel,
+  resolveWatchInstrument
+} from './investments/instrument.js';
+import { collectWatchTargets, fillLotState } from './investments/watch.js';
+import { fetchSymbolMark } from './investments/marks.js';
 import { buildExportCsv, buildExportJson } from './investments/export.js';
 import {
   buildWatchRows,
@@ -1140,5 +1149,287 @@ test('primary Investments workspace is the watchlist, not the ledger', () => {
   assert.ok(html.includes('CDNS'));
   assert.ok(html.includes('buy zone') || html.includes('FAKE1'));
   assert.ok(!html.includes('Confirmed imported transactions. P&amp;L is not mixed with TRACKING.'));
+  assert.ok(html.includes('>Price<'));
+  assert.ok(!html.includes('Live mark'));
+  assert.ok(html.includes('inv-remove-btn'));
+  assert.ok(!html.includes('history kept'));
+  assert.doesNotMatch(html, /id="inv-watch-table"[\s\S]*badge-tracking[\s\S]*id="inv-real-table"/);
+});
+
+test('instrument class: OKX coins vs Yahoo ETFs vs equity', () => {
+  assert.strictEqual(defaultInstrumentClass('BTC'), 'crypto');
+  assert.strictEqual(defaultInstrumentClass('ETH'), 'crypto');
+  assert.strictEqual(defaultInstrumentClass('IBIT'), 'etf');
+  assert.strictEqual(defaultInstrumentClass('ETHA'), 'etf');
+  assert.strictEqual(defaultInstrumentClass('CDNS'), 'equity');
+  assert.strictEqual(formatInstrumentLabel({ symbol: 'BTC', assetClass: 'crypto' }), 'BTC · coin');
+  assert.strictEqual(formatInstrumentLabel({ symbol: 'IBIT', assetClass: 'etf', yahooTicker: 'IBIT' }), 'IBIT · ETF');
+  assert.strictEqual(formatInstrumentLabel({ symbol: 'CDNS', assetClass: 'equity' }), 'CDNS · equity');
+
+  const etfBtc = resolveWatchInstrument({ symbol: 'BTC', assetClass: 'etf' });
+  assert.strictEqual(etfBtc.ok, false);
+  assert.ok(etfBtc.errors.some((e) => /Yahoo ticker/i.test(e)));
+
+  const ibit = resolveWatchInstrument({ symbol: 'BTC', assetClass: 'etf', yahooTicker: 'IBIT' });
+  assert.strictEqual(ibit.ok, true);
+  assert.strictEqual(ibit.markSymbol, 'IBIT');
+  assert.strictEqual(ibit.assetClass, 'etf');
+
+  const imported = classifyImportedInstrument({ listedSymbol: 'FBTC', symbol: 'BTC' });
+  assert.strictEqual(imported.symbol, 'FBTC');
+  assert.strictEqual(imported.assetClass, 'etf');
+  assert.strictEqual(imported.needsInstrumentClass, false);
+
+  const ambiguous = classifyImportedInstrument({ listedSymbol: 'BTC' });
+  assert.strictEqual(ambiguous.needsInstrumentClass, true);
+  assert.ok(ambiguous.blockedCryptoCollapse);
+});
+
+test('imported IBIT/ETHA stay listed tickers even if a map points at BTC/ETH', () => {
+  const csv = buildEtradePositionsCsv([
+    { Symbol: 'IBIT', Quantity: '2', LastPrice: '32', CostBasis: '56.06', AverageCost: '28.03', MarketValue: '64' },
+    { Symbol: 'ETHA', Quantity: '1', LastPrice: '20', CostBasis: '18', AverageCost: '18', MarketValue: '20' }
+  ]);
+  const preview = previewImport(csv, {
+    idPrefix: 'etf_keep',
+    symbolMaps: [
+      { id: 'm1', fromSymbol: 'IBIT', toSymbol: 'BTC' },
+      { id: 'm2', fromSymbol: 'ETHA', toSymbol: 'ETH' }
+    ]
+  });
+  const ibit = preview.events.find((e) => e.listedSymbol === 'IBIT' || e.symbol === 'IBIT');
+  const etha = preview.events.find((e) => e.listedSymbol === 'ETHA' || e.symbol === 'ETHA');
+  assert.strictEqual(ibit.symbol, 'IBIT');
+  assert.strictEqual(ibit.assetClass, 'etf');
+  assert.strictEqual(etha.symbol, 'ETHA');
+  assert.strictEqual(etha.assetClass, 'etf');
+  assert.notStrictEqual(ibit.symbol, 'BTC');
+  assert.notStrictEqual(etha.symbol, 'ETH');
+});
+
+test('BTC ETF watch uses IBIT mark, not OKX coin spot; coin row can coexist', () => {
+  const rows = buildWatchRows({
+    tracking: [
+      {
+        id: 'etf',
+        symbol: 'IBIT',
+        assetClass: 'etf',
+        yahooTicker: 'IBIT',
+        markSymbol: 'IBIT',
+        startDate: '2026-08-31',
+        targetPrice: 40,
+        direction: 'long',
+        status: 'active'
+      },
+      {
+        id: 'coin',
+        symbol: 'BTC',
+        assetClass: 'crypto',
+        markSymbol: 'BTC',
+        startDate: '2026-08-31',
+        baselinePrice: 70000,
+        targetPrice: 100000,
+        direction: 'long',
+        status: 'active'
+      }
+    ],
+    realPositions: [{
+      symbol: 'IBIT',
+      assetClass: 'etf',
+      markSymbol: 'IBIT',
+      quantity: 1,
+      costBasis: 28.03,
+      averagePrice: 28.03
+    }],
+    markPrices: { BTC: 77128.70, IBIT: 32.5 }
+  });
+  const etf = rows.find((r) => r.id === 'etf');
+  const coin = rows.find((r) => r.id === 'coin');
+  assert.strictEqual(etf.mark, 32.5);
+  assert.strictEqual(etf.entry, 28.03);
+  assert.ok(Math.abs(etf.returnPct - ((32.5 - 28.03) / 28.03)) < 1e-9);
+  assert.ok(etf.returnPct < 1);
+  assert.strictEqual(etf.label, 'IBIT · ETF');
+  assert.strictEqual(coin.mark, 77128.70);
+  assert.strictEqual(coin.label, 'BTC · coin');
+  const targets = collectWatchTargets({
+    tracking: [
+      { symbol: 'IBIT', assetClass: 'etf', yahooTicker: 'IBIT', markSymbol: 'IBIT' },
+      { symbol: 'BTC', assetClass: 'crypto', markSymbol: 'BTC' },
+      { symbol: 'BTC', assetClass: 'etf', needsInstrumentClass: true }
+    ]
+  });
+  assert.deepStrictEqual(targets.map((t) => `${t.assetClass}:${t.markSymbol}`).sort(), [
+    'crypto:BTC',
+    'etf:IBIT'
+  ]);
+});
+
+test('target persists on add/merge; second add of same equity updates the same row', () => {
+  const store = new InvestmentsStore({ storage: new MemoryStorage() });
+  const first = startTrackingInput({
+    symbol: 'CDNS',
+    assetClass: 'equity',
+    startDate: '2026-09-11',
+    targetPrice: 280,
+    requireTarget: true
+  });
+  assert.strictEqual(first.ok, true);
+  store.addOrMergeTracking(first.record);
+  const again = startTrackingInput({
+    symbol: 'CDNS',
+    assetClass: 'equity',
+    startDate: '2026-09-11',
+    targetPrice: 280,
+    requireTarget: true
+  });
+  store.addOrMergeTracking(again.record);
+  assert.strictEqual(store.collection('tracking').length, 1);
+  assert.strictEqual(store.collection('tracking')[0].targetPrice, 280);
+  assert.strictEqual(store.collection('tracking')[0].assetClass, 'equity');
+});
+
+test('Bought leftover is a lot (sell zone); full Sold returns to buy zone', () => {
+  const afterBuy = fillLotState([
+    { side: 'BUY', date: '2026-09-11', quantity: 2, price: 100 }
+  ]);
+  assert.strictEqual(afterBuy.hasLot, true);
+  assert.strictEqual(afterBuy.quantity, 2);
+
+  const rows = buildWatchRows({
+    tracking: [{
+      id: 'w',
+      symbol: 'CDNS',
+      assetClass: 'equity',
+      markSymbol: 'CDNS',
+      targetPrice: 280,
+      direction: 'long',
+      status: 'active',
+      fills: [{ side: 'BUY', date: '2026-09-11', quantity: 1, price: 270 }]
+    }],
+    markPrices: { CDNS: 290 }
+  });
+  assert.strictEqual(rows[0].hasRealLot, true);
+  assert.strictEqual(rows[0].inZone, true);
+  assert.strictEqual(rows[0].zone, 'sell');
+
+  const sold = buildWatchRows({
+    tracking: [{
+      id: 'w',
+      symbol: 'CDNS',
+      assetClass: 'equity',
+      markSymbol: 'CDNS',
+      targetPrice: 280,
+      direction: 'long',
+      status: 'active',
+      fills: [
+        { side: 'BUY', date: '2026-09-11', quantity: 1, price: 270 },
+        { side: 'SELL', date: '2026-09-12', quantity: 1, price: 300 }
+      ]
+    }],
+    markPrices: { CDNS: 270 }
+  });
+  assert.strictEqual(sold[0].hasRealLot, false);
+  assert.strictEqual(sold[0].inZone, true);
+  assert.strictEqual(sold[0].zone, 'buy');
+});
+
+test('every watch row can be removed, including imported lots; no history-kept dead end', () => {
+  const store = new InvestmentsStore({ storage: new MemoryStorage() });
+  const added = store.addTracking(startTrackingInput({
+    symbol: 'CDNS',
+    assetClass: 'equity',
+    startDate: '2026-09-11',
+    targetPrice: 280,
+    requireTarget: true
+  }).record);
+  store.addWatchFill(added.id, { side: 'BUY', quantity: 1, price: 270, date: '2026-09-11' });
+  const html = renderWorkspaceHtml({
+    storeState: store.getState(),
+    pnl: { REAL: { positions: [{ symbol: 'IBIT', assetClass: 'etf', markSymbol: 'IBIT', quantity: 1, costBasis: 28, averagePrice: 28 }] }, TRACKING: { positions: [] } },
+    markPrices: { CDNS: 289.37, IBIT: 32 },
+    markMeta: { CDNS: { dateUtc: '2026-09-11', asOf: '2026-09-11' } }
+  });
+  assert.ok(!html.includes('history kept'));
+  assert.ok((html.match(/inv-remove-btn/g) || []).length >= 2);
+  assert.ok(html.includes('Bought'));
+  assert.ok(html.includes('Sold'));
+  assert.ok(html.includes('as of 2026-09-11'));
+  assert.ok(html.includes('CDNS · equity') || html.includes('IBIT · ETF'));
+
+  const controller = new InvestmentsController({
+    store,
+    view: { render() {}, renderEmpty() {}, renderPreview() {}, hidePreview() {} },
+    confirmImpl: () => true
+  });
+  assert.strictEqual(controller.removeWatch(added.id), true);
+  assert.strictEqual(store.collection('tracking').length, 0);
+});
+
+test('Add watch auto-refreshes Yahoo/OKX marks with assetClass; ETF never fetches BTC spot', async () => {
+  const urls = [];
+  const store = new InvestmentsStore({ storage: new MemoryStorage() });
+  const controller = new InvestmentsController({
+    store,
+    view: { render() {}, renderEmpty() {}, renderPreview() {}, hidePreview() {} },
+    fetchImpl: async (url) => {
+      urls.push(String(url));
+      const text = String(url);
+      if (text.includes('/api/refresh')) return { ok: true, json: async () => ({}) };
+      const symbol = new URL(text, 'http://local').searchParams.get('symbol');
+      const close = symbol === 'CDNS' ? 289.37 : (symbol === 'IBIT' ? 32.5 : null);
+      return {
+        ok: Boolean(close),
+        json: async () => (close
+          ? { data: [{ date_utc: '2026-09-11', close, timestamp: 1 }] }
+          : { error: 'missing' })
+      };
+    }
+  });
+
+  const form = {
+    get(name) {
+      return ({
+        symbol: 'CDNS',
+        assetClass: 'equity',
+        startDate: '2026-09-11',
+        targetPrice: '280',
+        direction: 'long'
+      })[name];
+    }
+  };
+  await controller.addWatchFromForm(form).pending;
+  assert.strictEqual(store.collection('tracking')[0].targetPrice, 280);
+  assert.strictEqual(controller.markPrices.CDNS, 289.37);
+  assert.ok(urls.some((u) => u.includes('/api/refresh?') && u.includes('symbol=CDNS') && u.includes('assetClass=equity')));
+
+  urls.length = 0;
+  store.addTracking(startTrackingInput({
+    symbol: 'BTC',
+    assetClass: 'etf',
+    yahooTicker: 'IBIT',
+    startDate: '2026-09-11',
+    targetPrice: 40,
+    requireTarget: true
+  }).record);
+  await controller.refreshMarks();
+  assert.strictEqual(controller.markPrices.IBIT, 32.5);
+  assert.ok(urls.some((u) => u.includes('symbol=IBIT') && u.includes('assetClass=etf')));
+  assert.ok(!urls.some((u) => /symbol=BTC/.test(u)));
+});
+
+test('fetchSymbolMark skips unresolved BTC ETF (no silent $77k coin)', async () => {
+  const urls = [];
+  const result = await fetchSymbolMark('BTC', {
+    assetClass: 'etf',
+    needsInstrumentClass: true,
+    fetchImpl: async (url) => {
+      urls.push(String(url));
+      return { ok: true, json: async () => ({ data: [{ close: 77128 }] }) };
+    }
+  });
+  assert.strictEqual(result.mark, null);
+  assert.ok(result.error);
+  assert.deepStrictEqual(urls, []);
 });
 
