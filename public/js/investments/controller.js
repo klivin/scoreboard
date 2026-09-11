@@ -1,12 +1,22 @@
 import { InvestmentsStore } from './store.js';
 import { previewImport } from './validate.js';
 import { computeLotsAndPnl } from './lots.js';
-import { validatePaperTrade, startTrackingInput } from './tracking.js';
-import { applyStartMarkFreeze, collectWatchSymbols } from './watch.js';
-import { fetchMarksForSymbols, lastFiniteClose } from './marks.js';
+import { validatePaperTrade, startTrackingInput, todayIsoDate } from './tracking.js';
+import {
+  applyStartMarkFreeze,
+  collectWatchTargets,
+  markSymbolFor
+} from './watch.js';
+import { fetchMarksForTargets, lastFiniteClose } from './marks.js';
 import { buildExportCsv, buildExportJson, downloadBlob } from './export.js';
 import { InvestmentsView } from './view.js';
 import { parseOptionalNumber } from './parse.js';
+import {
+  defaultInstrumentClass,
+  normalizeInstrumentClass,
+  resolveWatchInstrument,
+  suggestedEtfTickers
+} from './instrument.js';
 
 function readLocalFile(file) {
   return new Promise((resolve, reject) => {
@@ -24,17 +34,31 @@ export class InvestmentsController {
     this.preview = null;
     this.onChange = options.onChange || null;
     this.markPrices = options.markPrices || {};
+    this.markMeta = options.markMeta || {};
     this.markStatus = '';
     this.fetchImpl = options.fetchImpl || null;
     this.refreshing = false;
+    this.confirmImpl = options.confirmImpl || ((message) => {
+      if (typeof window !== 'undefined' && window.confirm) return window.confirm(message);
+      return true;
+    });
+    this.promptImpl = options.promptImpl || ((message, fallback) => {
+      if (typeof window !== 'undefined' && window.prompt) return window.prompt(message, fallback);
+      return fallback;
+    });
+    this.alertImpl = options.alertImpl || ((message) => {
+      if (typeof window !== 'undefined' && window.alert) window.alert(message);
+    });
   }
 
   importedHintMarks() {
     const hints = {};
     for (const event of this.store.collection('events') || []) {
-      if (event && event.symbol && Number.isFinite(event.lastPrice) && hints[event.symbol] == null) {
-        hints[event.symbol] = event.lastPrice;
-      }
+      if (!event || !event.symbol || !Number.isFinite(event.lastPrice)) continue;
+      const cls = normalizeInstrumentClass(event.assetClass) || defaultInstrumentClass(event.symbol);
+      const key = event.markSymbol || event.yahooTicker || event.symbol;
+      if (cls === 'crypto' && hints[key] == null) hints[key] = event.lastPrice;
+      if (cls !== 'crypto' && hints[key] == null) hints[key] = event.lastPrice;
     }
     return hints;
   }
@@ -55,13 +79,14 @@ export class InvestmentsController {
       storeState,
       pnl,
       markPrices,
+      markMeta: this.markMeta,
       markStatus: this.markStatus
     };
   }
 
   refresh() {
     this.view.render(this.model());
-    this.bindWorkspace();
+    if (typeof document !== 'undefined') this.bindWorkspace();
     if (typeof this.onChange === 'function') this.onChange(this.store);
   }
 
@@ -75,17 +100,27 @@ export class InvestmentsController {
 
   setMarksFromSeries(symbol, series) {
     const last = lastFiniteClose(series);
-    if (last) this.setMark(symbol, last.close);
+    if (last) {
+      this.markMeta = {
+        ...this.markMeta,
+        [String(symbol || '').toUpperCase()]: {
+          dateUtc: last.dateUtc,
+          timestamp: last.timestamp,
+          asOf: last.dateUtc
+        }
+      };
+      this.setMark(symbol, last.close);
+    }
   }
 
   freezeStartMarks(marks, startCloses) {
     const tracking = this.store.collection('tracking') || [];
     for (const record of tracking) {
       if (!record || record.status === 'stopped') continue;
-      const symbol = record.symbol;
+      const key = markSymbolFor(record) || record.symbol;
       const next = applyStartMarkFreeze(record, {
-        liveMark: marks && marks[symbol],
-        seriesStartClose: startCloses && startCloses[symbol]
+        liveMark: marks && marks[key],
+        seriesStartClose: startCloses && startCloses[key]
       });
       if (next !== record && Number.isFinite(next.startMark)) {
         this.store.updateTracking(record.id, {
@@ -96,50 +131,76 @@ export class InvestmentsController {
     }
   }
 
+  ensureImportedWatches() {
+    const events = this.store.allFillEvents();
+    const pnl = computeLotsAndPnl(events, {
+      costMethod: this.store.getCostMethod(),
+      markPrices: this.mergedMarks()
+    });
+    for (const position of (pnl.REAL && pnl.REAL.positions) || []) {
+      if (!position || !position.symbol) continue;
+      this.store.addOrMergeTracking({
+        symbol: position.symbol,
+        listedSymbol: position.listedSymbol || position.symbol,
+        assetClass: position.needsInstrumentClass
+          ? null
+          : (position.assetClass || defaultInstrumentClass(position.symbol)),
+        yahooTicker: position.yahooTicker,
+        markSymbol: position.markSymbol || position.symbol,
+        needsInstrumentClass: Boolean(position.needsInstrumentClass),
+        startDate: todayIsoDate(),
+        baselinePrice: Number.isFinite(position.averagePrice) ? position.averagePrice : null,
+        source: 'import'
+      });
+    }
+  }
+
   async refreshMarks() {
     if (this.refreshing) return;
     const pnl = this.model().pnl;
-    const symbols = collectWatchSymbols({
+    const targets = collectWatchTargets({
       tracking: this.store.collection('tracking'),
       realPositions: pnl.REAL.positions
     });
-    if (!symbols.length) {
-      this.markStatus = 'Add a watch row or import a REAL lot, then refresh.';
+    if (!targets.length) {
+      const unresolved = (this.store.collection('tracking') || []).some((row) => row.needsInstrumentClass);
+      this.markStatus = unresolved
+        ? 'Pick coin vs ETF on unresolved BTC/ETH rows before refresh. Coin spot is not used until you choose.'
+        : 'Add a watch row or import a REAL lot, then refresh.';
       this.refresh();
       return;
     }
 
     this.refreshing = true;
-    this.markStatus = `Refreshing ${symbols.join(', ')} via Overview ingest (Yahoo / OKX)…`;
+    this.markStatus = `Refreshing ${targets.map((t) => `${t.markSymbol} (${t.assetClass})`).join(', ')} via Overview ingest (Yahoo / OKX)…`;
     this.refresh();
 
-    const startDates = {};
-    for (const record of this.store.collection('tracking') || []) {
-      if (record && record.symbol && record.startDate && !startDates[record.symbol]) {
-        startDates[record.symbol] = record.startDate;
-      }
-    }
-
     const nextMarks = { ...this.markPrices };
+    const nextMeta = { ...this.markMeta };
     const startCloses = {};
     const notes = [];
     try {
-      for (const symbol of symbols) {
-        const result = await fetchMarksForSymbols([symbol], {
-          fetchImpl: this.fetchImpl || fetch,
-          startDate: startDates[symbol] || null
-        });
-        if (Number.isFinite(result.marks[symbol])) {
-          nextMarks[symbol] = result.marks[symbol];
-          notes.push(`${symbol} ${result.marks[symbol].toFixed(2)}`);
+      const result = await fetchMarksForTargets(targets, {
+        fetchImpl: this.fetchImpl || fetch,
+        interval: '1d'
+      });
+      for (const target of targets) {
+        const key = target.markSymbol;
+        if (Number.isFinite(result.marks[key])) {
+          nextMarks[key] = result.marks[key];
+          notes.push(`${key} ${result.marks[key].toFixed(2)}`);
         } else {
-          notes.push(`${symbol} missing`);
+          notes.push(`${key} missing`);
         }
-        if (Number.isFinite(result.startCloses[symbol])) {
-          startCloses[symbol] = result.startCloses[symbol];
+        if (Number.isFinite(result.startCloses[key])) {
+          startCloses[key] = result.startCloses[key];
+        }
+        if (result.meta && result.meta[key]) {
+          nextMeta[key] = result.meta[key];
         }
       }
       this.markPrices = nextMarks;
+      this.markMeta = nextMeta;
       this.freezeStartMarks(nextMarks, startCloses);
       this.markStatus = `Marks: ${notes.join(' · ')}. Missing stays missing — prices are not invented.`;
     } catch (error) {
@@ -148,6 +209,124 @@ export class InvestmentsController {
       this.refreshing = false;
       this.refresh();
     }
+  }
+
+  addWatchFromForm(data) {
+    const checked = startTrackingInput({
+      symbol: data.get('symbol'),
+      assetClass: data.get('assetClass'),
+      yahooTicker: data.get('yahooTicker'),
+      startDate: data.get('startDate'),
+      baselinePrice: parseOptionalNumber(data.get('baselinePrice')),
+      targetPrice: parseOptionalNumber(data.get('targetPrice')),
+      targetHigh: parseOptionalNumber(data.get('targetHigh')),
+      direction: data.get('direction'),
+      requireTarget: true
+    });
+    if (!checked.ok) {
+      this.alertImpl(checked.errors.join('\n'));
+      return null;
+    }
+    const record = this.store.addOrMergeTracking(checked.record);
+    this.refresh();
+    const pending = this.refreshMarks();
+    return { record, pending };
+  }
+
+  removeWatch(id, { dropFills = true } = {}) {
+    const tracking = this.store.collection('tracking') || [];
+    let record = tracking.find((row) => row.id === id);
+    if (!record && String(id || '').startsWith('real_')) {
+      const symbol = String(id).split('_').slice(2).join('_');
+      record = {
+        id,
+        symbol,
+        assetClass: String(id).split('_')[1],
+        markSymbol: symbol
+      };
+    }
+    if (!record) return false;
+    const ok = this.confirmImpl(
+      dropFills
+        ? `Remove ${record.symbol || 'this'} watch row and its fills? This cannot be undone in this browser.`
+        : `Remove ${record.symbol || 'this'} watch row? Fills stay in the store.`
+    );
+    if (!ok) return false;
+    if (record.id && !String(record.id).startsWith('real_')) {
+      this.store.removeTracking(record.id);
+    }
+    if (dropFills) this.store.removeInstrumentLots(record, { dropFills: true });
+    this.refresh();
+    return true;
+  }
+
+  editEntry(id) {
+    const record = (this.store.collection('tracking') || []).find((row) => row.id === id);
+    if (!record) return false;
+    const current = record.entryOverride ?? record.baselinePrice ?? record.startMark ?? '';
+    const raw = this.promptImpl('Entry / cost', current == null ? '' : String(current));
+    if (raw == null) return false;
+    const price = parseOptionalNumber(raw);
+    if (!Number.isFinite(price)) {
+      this.alertImpl('Entry / cost must be a number');
+      return false;
+    }
+    this.store.updateTracking(id, {
+      entryOverride: price,
+      baselinePrice: price,
+      startMark: record.startMark == null ? price : record.startMark
+    });
+    this.store.updateRealUnitCost(record, price);
+    this.refresh();
+    return true;
+  }
+
+  addFill(id, input = {}) {
+    let record = (this.store.collection('tracking') || []).find((row) => row.id === id);
+    if (!record && String(id || '').startsWith('real_')) {
+      const parts = String(id).split('_');
+      const assetClass = parts[1];
+      const symbol = parts.slice(2).join('_');
+      record = this.store.addOrMergeTracking({
+        symbol,
+        assetClass,
+        markSymbol: symbol,
+        startDate: todayIsoDate(),
+        source: 'import'
+      });
+      id = record.id;
+    }
+    if (!record) return null;
+    const markKey = markSymbolFor(record) || record.symbol;
+    const price = Number.isFinite(input.price) ? input.price : this.markPrices[markKey];
+    const fill = this.store.addWatchFill(id, {
+      side: input.side,
+      quantity: input.quantity,
+      price,
+      date: input.date || todayIsoDate()
+    });
+    if (!fill) {
+      this.alertImpl('Fill needs a price (use Refresh if Price is missing) and a quantity greater than 0.');
+      return null;
+    }
+    this.refresh();
+    return fill;
+  }
+
+  applyRowInstrument(id, input = {}) {
+    const resolved = resolveWatchInstrument({
+      symbol: input.symbol,
+      assetClass: input.assetClass,
+      yahooTicker: input.yahooTicker
+    });
+    if (!resolved.ok) {
+      this.alertImpl(resolved.errors.join('\n'));
+      return null;
+    }
+    const updated = this.store.applyInstrumentClass(id, resolved);
+    this.refresh();
+    this.refreshMarks();
+    return updated;
   }
 
   async handleFile(file) {
@@ -165,9 +344,11 @@ export class InvestmentsController {
   commitPreview() {
     if (!this.preview || !this.preview.canCommit) return;
     this.store.commitImport(this.preview, { sourceFileName: this.preview.sourceFileName });
+    this.ensureImportedWatches();
     this.preview = null;
     this.view.hidePreview();
     this.refresh();
+    this.refreshMarks();
   }
 
   bindPreview() {
@@ -180,6 +361,40 @@ export class InvestmentsController {
         this.view.hidePreview();
       });
     }
+  }
+
+  bindWatchFormExtras() {
+    const symbolInput = document.querySelector('#inv-watch-form [name="symbol"]');
+    const classSelect = document.querySelector('#inv-watch-form [name="assetClass"]');
+    const yahooWrap = document.getElementById('inv-yahoo-wrap');
+    const yahooInput = document.querySelector('#inv-watch-form [name="yahooTicker"]');
+    const yahooHelp = document.getElementById('inv-yahoo-help');
+    const sync = (fromSymbol) => {
+      if (!classSelect) return;
+      if (fromSymbol && symbolInput) {
+        classSelect.value = defaultInstrumentClass(symbolInput.value);
+      }
+      const cls = classSelect.value;
+      if (yahooWrap) yahooWrap.classList.toggle('hidden', cls !== 'etf');
+      if (yahooHelp && symbolInput) {
+        const suggestions = suggestedEtfTickers(symbolInput.value).join(', ');
+        yahooHelp.textContent = `Yahoo ticker required for ETF (e.g. ${suggestions}). Coin spot is not used.`;
+      }
+      if (cls === 'etf' && yahooInput && symbolInput && !yahooInput.value) {
+        const upper = String(symbolInput.value || '').trim().toUpperCase();
+        if (defaultInstrumentClass(upper) === 'etf') yahooInput.value = upper;
+      }
+    };
+    if (symbolInput && !symbolInput.dataset.boundClass) {
+      symbolInput.dataset.boundClass = '1';
+      symbolInput.addEventListener('input', () => sync(true));
+      symbolInput.addEventListener('change', () => sync(true));
+    }
+    if (classSelect && !classSelect.dataset.boundClass) {
+      classSelect.dataset.boundClass = '1';
+      classSelect.addEventListener('change', () => sync(false));
+    }
+    sync(false);
   }
 
   bindWorkspace() {
@@ -202,24 +417,14 @@ export class InvestmentsController {
       watchForm.dataset.bound = '1';
       watchForm.addEventListener('submit', (event) => {
         event.preventDefault();
-        const data = new FormData(watchForm);
-        const checked = startTrackingInput({
-          symbol: data.get('symbol'),
-          startDate: data.get('startDate'),
-          baselinePrice: parseOptionalNumber(data.get('baselinePrice')),
-          targetPrice: parseOptionalNumber(data.get('targetPrice')),
-          targetHigh: parseOptionalNumber(data.get('targetHigh')),
-          direction: data.get('direction'),
-          requireTarget: true
-        });
-        if (!checked.ok) {
-          window.alert(checked.errors.join('\n'));
-          return;
-        }
-        this.store.addTracking(checked.record);
-        this.refresh();
+        this.addWatchFromForm(new FormData(watchForm));
+        watchForm.reset();
+        const start = watchForm.querySelector('[name="startDate"]');
+        if (start) start.value = todayIsoDate();
+        this.bindWatchFormExtras();
       });
     }
+    this.bindWatchFormExtras();
 
     const refreshMarks = document.getElementById('inv-refresh-marks-btn');
     if (refreshMarks && !refreshMarks.dataset.bound) {
@@ -269,7 +474,7 @@ export class InvestmentsController {
           note: data.get('note')
         });
         if (!checked.ok) {
-          window.alert(checked.errors.join('\n'));
+          this.alertImpl(checked.errors.join('\n'));
           return;
         }
         this.store.addPaperTrade(checked.trade);
@@ -277,16 +482,52 @@ export class InvestmentsController {
       });
     }
 
-    document.querySelectorAll('.inv-stop-btn').forEach((btn) => {
+    document.querySelectorAll('.inv-remove-btn').forEach((btn) => {
       btn.addEventListener('click', () => {
-        const id = btn.dataset.trackId;
-        const today = new Date().toISOString().slice(0, 10);
-        const row = (this.store.collection('tracking') || []).find((r) => r.id === id);
-        const stopPrice = row && Number.isFinite(this.markPrices[row.symbol])
-          ? this.markPrices[row.symbol]
-          : null;
-        this.store.stopTracking(id, { stopDate: today, stopPrice });
-        this.refresh();
+        this.removeWatch(btn.dataset.trackId, { dropFills: true });
+      });
+    });
+
+    document.querySelectorAll('.inv-edit-entry-btn').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        this.editEntry(btn.dataset.trackId);
+      });
+    });
+
+    document.querySelectorAll('.inv-fill-toggle').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const editor = document.getElementById(`inv-fill-editor-${btn.dataset.trackId}`);
+        if (!editor) return;
+        editor.classList.remove('hidden');
+        const side = editor.querySelector('[name="side"]');
+        if (side) side.value = btn.dataset.side || 'BUY';
+        const label = editor.querySelector('.inv-fill-side-label');
+        if (label) label.textContent = (btn.dataset.side || 'BUY') === 'SELL' ? 'Sold' : 'Bought';
+      });
+    });
+
+    document.querySelectorAll('.inv-row-fill-form').forEach((form) => {
+      form.addEventListener('submit', (event) => {
+        event.preventDefault();
+        const data = new FormData(form);
+        this.addFill(form.dataset.trackId, {
+          side: data.get('side'),
+          quantity: parseOptionalNumber(data.get('quantity')),
+          price: parseOptionalNumber(data.get('price')),
+          date: data.get('date')
+        });
+      });
+    });
+
+    document.querySelectorAll('.inv-class-form').forEach((form) => {
+      form.addEventListener('submit', (event) => {
+        event.preventDefault();
+        const data = new FormData(form);
+        this.applyRowInstrument(form.dataset.trackId, {
+          symbol: data.get('symbol'),
+          assetClass: data.get('assetClass'),
+          yahooTicker: data.get('yahooTicker')
+        });
       });
     });
 
@@ -306,7 +547,7 @@ export class InvestmentsController {
           });
           this.refresh();
         } catch (error) {
-          window.alert(error.message);
+          this.alertImpl(error.message);
         }
       });
     }

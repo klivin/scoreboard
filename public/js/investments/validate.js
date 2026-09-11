@@ -36,6 +36,11 @@ export function validateEvents(events) {
     if (!event.symbol && event.activityType !== 'fee' && event.activityType !== 'unsupported') {
       warnings.push(`${label}: symbol is missing — no automatic inference`);
     }
+    if (event.needsInstrumentClass) {
+      warnings.push(
+        `${label}: ${event.symbol || 'BTC/ETH'} may be coin or ETF — pick a venue on the watch row. Coin spot is not used until you choose.`
+      );
+    }
   });
 
   return { errors, warnings };

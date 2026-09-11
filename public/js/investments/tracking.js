@@ -1,3 +1,5 @@
+import { resolveWatchInstrument } from './instrument.js';
+
 export function paperTradeToEvent(trade) {
   const side = String(trade.side || '').toUpperCase() === 'SELL' ? 'SELL' : 'BUY';
   const quantity = trade.quantity;
@@ -103,7 +105,6 @@ export function trackingForwardPerformance(record, markPrice) {
 
 export function startTrackingInput(input = {}, now = new Date()) {
   const errors = [];
-  const symbol = input.symbol ? String(input.symbol).trim().toUpperCase() : '';
   const startDate = input.startDate || todayIsoDate(now);
   const baselineRaw = input.baselinePrice;
   const baselinePrice = baselineRaw == null || baselineRaw === '' ? null : Number(baselineRaw);
@@ -112,8 +113,13 @@ export function startTrackingInput(input = {}, now = new Date()) {
   const targetHighRaw = input.targetHigh;
   const targetHigh = targetHighRaw == null || targetHighRaw === '' ? null : Number(targetHighRaw);
   const direction = normalizeDirection(input.direction);
+  const instrument = resolveWatchInstrument({
+    symbol: input.symbol,
+    assetClass: input.assetClass,
+    yahooTicker: input.yahooTicker
+  });
 
-  if (!symbol) errors.push('Tracking symbol is required');
+  if (!instrument.ok) errors.push(...instrument.errors);
   if (!startDate) errors.push('Tracking start date is required');
   if (baselineRaw != null && baselineRaw !== '' && !Number.isFinite(baselinePrice)) {
     errors.push('Tracking start mark must be a number when provided');
@@ -131,13 +137,19 @@ export function startTrackingInput(input = {}, now = new Date()) {
     ok: errors.length === 0,
     errors,
     record: {
-      symbol,
+      symbol: instrument.symbol || String(input.symbol || '').trim().toUpperCase(),
+      listedSymbol: instrument.listedSymbol || null,
+      assetClass: instrument.assetClass,
+      yahooTicker: instrument.yahooTicker,
+      markSymbol: instrument.markSymbol,
+      needsInstrumentClass: Boolean(instrument.needsInstrumentClass),
       startDate,
       baselinePrice: Number.isFinite(baselinePrice) ? baselinePrice : null,
       startMark: Number.isFinite(baselinePrice) ? baselinePrice : null,
       targetPrice: Number.isFinite(targetPrice) ? targetPrice : null,
       targetHigh: Number.isFinite(targetHigh) ? targetHigh : null,
-      direction
+      direction,
+      fills: Array.isArray(input.fills) ? input.fills : []
     }
   };
 }

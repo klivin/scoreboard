@@ -737,6 +737,63 @@ button:hover {
   color: white;
 }
 
+.inv-instrument {
+  font-weight: 700;
+}
+
+.inv-asof {
+  font-size: 0.72rem;
+  font-weight: 500;
+  color: #6b7280;
+  margin-top: 2px;
+}
+
+.inv-row-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.inv-row-actions button,
+.inv-inline-form button {
+  font-size: 0.75rem;
+  padding: 4px 8px;
+}
+
+.inv-remove-btn {
+  background: #7f1d1d;
+  color: white;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.inv-inline-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  align-items: flex-end;
+  margin-top: 8px;
+}
+
+.inv-fill-indent {
+  padding-left: 1.5rem !important;
+}
+
+.inv-fill-sub,
+.inv-fill-cols {
+  background: #fff7ed;
+}
+
+.inv-fill-head td {
+  background: #ffedd5;
+  font-size: 0.85rem;
+}
+
+.inv-fill-editor td {
+  background: #fffbeb;
+}
+
 .inv-flag {
   display: inline-block;
   margin: 0 2px 2px 0;

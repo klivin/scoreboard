@@ -487,4 +487,11 @@ test('adaptersForTicker builds OKX 1h+1d for SOL and stock-public for AAPL/CDNS'
   const cdns = adaptersForTicker('CDNS');
   assert.ok(cdns.every((a) => a.id === 'stock-public' && a.symbol === 'CDNS' && a.mode === 'incremental'));
   assert.deepStrictEqual(cdns.map((a) => a.interval).sort(), ['1d', '1h']);
+  const ibit = adaptersForTicker('IBIT');
+  assert.ok(ibit.every((a) => a.id === 'stock-public' && a.symbol === 'IBIT'));
+  const btcEtf = adaptersForTicker('BTC', { assetClass: 'etf' });
+  assert.ok(btcEtf.every((a) => a.id === 'stock-public'));
+  const btcCoin = adaptersForTicker('BTC', { assetClass: 'crypto' });
+  assert.ok(btcCoin.some((a) => a.id === 'okx-candles'));
+  assert.ok(!btcCoin.some((a) => a.id === 'stock-public'));
 });

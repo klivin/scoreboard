@@ -1,3 +1,8 @@
+import {
+  classifyImportedInstrument,
+  isKnownCryptoEtf
+} from './instrument.js';
+
 const MISSING_TOKENS = new Set(['', '--', '—', 'n/a', 'na', 'null', 'none', '.']);
 
 export const ACTIVITY_TYPES = Object.freeze([
@@ -190,6 +195,23 @@ export function normalizeRow(row, options = {}) {
   const amount = parseOptionalNumber(record.Amount);
   const commission = parseOptionalNumber(record.Commission);
   const mapped = applySymbolMaps(record.Symbol, record.Cusip, maps);
+  const listedSymbol = emptyToMissing(record.Symbol)
+    ? String(emptyToMissing(record.Symbol)).toUpperCase()
+    : null;
+  const instrument = classifyImportedInstrument({
+    listedSymbol,
+    symbolRaw: listedSymbol,
+    symbol: mapped.symbol,
+    description: emptyToMissing(record.Description)
+  });
+  // Bought/Sold/Positions keep the E*TRADE ticker. Do not collapse IBIT/FBTC → BTC.
+  // Explicit maps still apply to exchanges/options (those are not share lots).
+  const keepListedEtf = (activityType === 'buy' || activityType === 'sell')
+    && isKnownCryptoEtf(listedSymbol);
+  const rawSymbol = keepListedEtf
+    ? instrument.symbol
+    : (mapped.symbol ? String(mapped.symbol).toUpperCase() : instrument.symbol);
+  const symbol = rawSymbol ? String(rawSymbol).toUpperCase() : null;
 
   const missingQuantity = quantity == null;
   const missingPrice = price == null;
@@ -212,8 +234,13 @@ export function normalizeRow(row, options = {}) {
     activityType,
     description: emptyToMissing(record.Description)
       || (kind === 'positions' ? 'Positions snapshot' : null),
-    symbol: mapped.symbol ? String(mapped.symbol).toUpperCase() : null,
+    symbol,
     symbolRaw: emptyToMissing(record.Symbol),
+    listedSymbol: instrument.listedSymbol || listedSymbol,
+    assetClass: instrument.assetClass,
+    yahooTicker: instrument.yahooTicker,
+    markSymbol: instrument.markSymbol || symbol,
+    needsInstrumentClass: Boolean(instrument.needsInstrumentClass),
     cusip: mapped.cusip,
     quantity,
     price,

@@ -177,6 +177,11 @@ function finalizeBucket(symbols, extras, markPrices) {
         : missingMetric();
       positions.push({
         symbol,
+        assetClass: extras.symbolClass && extras.symbolClass[symbol] || null,
+        yahooTicker: extras.yahooTicker && extras.yahooTicker[symbol] || null,
+        markSymbol: extras.markSymbol && extras.markSymbol[symbol] || symbol,
+        listedSymbol: extras.listedSymbol && extras.listedSymbol[symbol] || symbol,
+        needsInstrumentClass: Boolean(extras.needsClass && extras.needsClass[symbol]),
         quantity: qty,
         costBasis: Number.isFinite(basis) ? basis : missingMetric(),
         averagePrice: qty > 0 && Number.isFinite(basis) ? basis / qty : missingMetric(),
@@ -242,7 +247,12 @@ function computeBucket(events, options = {}) {
     fees: [],
     closedLots: [],
     realizedAcc: null,
-    equityPoints: []
+    equityPoints: [],
+    symbolClass: {},
+    yahooTicker: {},
+    markSymbol: {},
+    listedSymbol: {},
+    needsClass: {}
   };
 
   const ensure = (symbol) => {
@@ -310,6 +320,12 @@ function computeBucket(events, options = {}) {
       extras.skipped.push({ event, reason: 'missing_symbol', noFillInferred: true });
       continue;
     }
+
+    if (event.assetClass) extras.symbolClass[event.symbol] = event.assetClass;
+    if (event.yahooTicker) extras.yahooTicker[event.symbol] = event.yahooTicker;
+    if (event.markSymbol) extras.markSymbol[event.symbol] = event.markSymbol;
+    if (event.listedSymbol) extras.listedSymbol[event.symbol] = event.listedSymbol;
+    if (event.needsInstrumentClass) extras.needsClass[event.symbol] = true;
 
     const state = ensure(event.symbol);
     const result = method === 'average'

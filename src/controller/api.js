@@ -338,7 +338,8 @@ function refreshFilterFromReq(req) {
   return {
     source: query.source || body.source || undefined,
     symbol: query.symbol || body.symbol || undefined,
-    interval: query.interval || body.interval || undefined
+    interval: query.interval || body.interval || undefined,
+    assetClass: query.assetClass || body.assetClass || undefined
   };
 }
 

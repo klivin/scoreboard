@@ -33,11 +33,23 @@ export function defaultAdapters(deps = {}) {
   ];
 }
 
+function forcedStockClass(assetClass) {
+  const text = String(assetClass || '').trim().toLowerCase();
+  return text === 'etf' || text === 'equity' || text === 'stock';
+}
+
+function forcedCryptoClass(assetClass) {
+  const text = String(assetClass || '').trim().toLowerCase();
+  return text === 'crypto' || text === 'coin';
+}
+
 export function adaptersForTicker(symbol, deps = {}) {
   const parsed = normalizeTicker(symbol);
   if (!parsed.symbol) return [];
 
-  if (parsed.assetClass === 'stock') {
+  const wantStock = forcedStockClass(deps.assetClass)
+    || (parsed.assetClass === 'stock' && !forcedCryptoClass(deps.assetClass));
+  if (wantStock) {
     return [
       createStockAdapter({ symbol: parsed.symbol, interval: '1h', ...deps }),
       createStockAdapter({ symbol: parsed.symbol, interval: '1d', ...deps })
@@ -71,10 +83,12 @@ export function adapterKey(adapter) {
   return `${adapter.id}:${String(adapter.symbol || '').toUpperCase()}:${adapter.interval || ''}`;
 }
 
-function matchesFilter(adapter, { source, symbol, interval } = {}) {
+function matchesFilter(adapter, { source, symbol, interval, assetClass } = {}) {
   if (source && adapter.id !== source) return false;
   if (symbol && String(adapter.symbol).toUpperCase() !== String(symbol).toUpperCase()) return false;
   if (interval && adapter.interval !== interval) return false;
+  if (forcedStockClass(assetClass) && adapter.id !== 'stock-public') return false;
+  if (forcedCryptoClass(assetClass) && adapter.id === 'stock-public') return false;
   return true;
 }
 
@@ -111,8 +125,8 @@ export function createRefreshRuntime({
     };
   }
 
-  function ensureSymbolAdapters(symbol) {
-    const extras = adaptersForTicker(symbol, { httpGet: http });
+  function ensureSymbolAdapters(symbol, extra = {}) {
+    const extras = adaptersForTicker(symbol, { httpGet: http, assetClass: extra.assetClass });
     const existing = new Set(adapterList.map(adapterKey));
     for (const adapter of extras) {
       const key = adapterKey(adapter);
@@ -304,14 +318,7 @@ export function createRefreshRuntime({
 
     state.running = true;
     if (filter && filter.symbol) {
-      const parsed = normalizeTicker(filter.symbol);
-      const already = adapterList.some((adapter) => (
-        String(adapter.symbol || '').toUpperCase() === parsed.symbol
-        && (adapter.id === 'okx-candles' || adapter.id === 'stock-public')
-      ));
-      if (!already) {
-        ensureSymbolAdapters(filter.symbol);
-      }
+      ensureSymbolAdapters(filter.symbol, { assetClass: filter.assetClass });
     }
     const selected = adapterList.filter((adapter) => matchesFilter(adapter, filter));
     const results = [];

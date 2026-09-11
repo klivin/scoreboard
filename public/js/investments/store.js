@@ -3,6 +3,11 @@ import {
   emptyState,
   migrateInvestmentsState
 } from './schema.js';
+import {
+  defaultInstrumentClass,
+  markSymbolFor,
+  sameInstrument
+} from './instrument.js';
 
 export { INVESTMENTS_STORAGE_KEY };
 
@@ -160,25 +165,49 @@ export class InvestmentsStore {
     return item;
   }
 
+  trackingIdentity(record) {
+    return {
+      symbol: record && record.symbol,
+      assetClass: record && (record.assetClass || defaultInstrumentClass(record.symbol)),
+      markSymbol: markSymbolFor(record),
+      yahooTicker: record && record.yahooTicker
+    };
+  }
+
+  findActiveTracking(record) {
+    const rows = this.collection('tracking') || [];
+    return rows.find((row) => row && row.status === 'active' && sameInstrument(row, record)) || null;
+  }
+
   addTracking(record) {
     const state = this.getState();
+    const assetClass = record.assetClass || defaultInstrumentClass(record.symbol);
+    const markSymbol = markSymbolFor({ ...record, assetClass });
     const item = {
       id: record.id || `track_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
       badge: 'TRACKING',
       symbol: String(record.symbol || '').toUpperCase(),
+      listedSymbol: record.listedSymbol ? String(record.listedSymbol).toUpperCase() : String(record.symbol || '').toUpperCase(),
+      assetClass,
+      yahooTicker: record.yahooTicker ? String(record.yahooTicker).toUpperCase() : (assetClass === 'etf' ? markSymbol : null),
+      markSymbol,
+      needsInstrumentClass: Boolean(record.needsInstrumentClass),
       startDate: record.startDate,
       baselinePrice: record.baselinePrice == null ? null : record.baselinePrice,
       startMark: record.startMark == null
         ? (record.baselinePrice == null ? null : record.baselinePrice)
         : record.startMark,
+      entryOverride: record.entryOverride == null ? null : record.entryOverride,
       targetPrice: record.targetPrice == null ? null : record.targetPrice,
       targetHigh: record.targetHigh == null ? null : record.targetHigh,
       direction: record.direction === 'short' ? 'short' : 'long',
+      fills: Array.isArray(record.fills) ? record.fills.slice() : [],
+      source: record.source || 'watch',
       startedAt: record.startedAt || Date.now(),
       stoppedAt: null,
       stopDate: null,
       stopPrice: null,
-      status: 'active',
+      status: record.status || 'active',
       history: [{
         action: 'start',
         date: record.startDate,
@@ -189,6 +218,34 @@ export class InvestmentsStore {
     state.collections.tracking.push(item);
     this.save();
     return item;
+  }
+
+  /**
+   * Same instrument + active row → merge (keeps existing target unless a new one is provided).
+   * BTC crypto and IBIT etf stay distinct rows.
+   */
+  addOrMergeTracking(record) {
+    const existing = this.findActiveTracking(record);
+    if (!existing) return this.addTracking(record);
+    const patch = {};
+    if (record.targetPrice != null) patch.targetPrice = record.targetPrice;
+    if (record.targetHigh != null) patch.targetHigh = record.targetHigh;
+    if (record.direction) patch.direction = record.direction;
+    if (record.startDate) patch.startDate = record.startDate;
+    if (record.baselinePrice != null) {
+      patch.baselinePrice = record.baselinePrice;
+      if (existing.startMark == null) patch.startMark = record.baselinePrice;
+    }
+    if (record.startMark != null && existing.startMark == null) patch.startMark = record.startMark;
+    if (record.assetClass) patch.assetClass = record.assetClass;
+    if (record.yahooTicker) patch.yahooTicker = record.yahooTicker;
+    if (record.markSymbol) patch.markSymbol = record.markSymbol;
+    if (record.listedSymbol) patch.listedSymbol = record.listedSymbol;
+    if (record.needsInstrumentClass != null && existing.needsInstrumentClass) {
+      patch.needsInstrumentClass = record.needsInstrumentClass;
+    }
+    if (record.entryOverride != null) patch.entryOverride = record.entryOverride;
+    return this.updateTracking(existing.id, patch);
   }
 
   updateTracking(id, patch = {}) {
@@ -218,6 +275,110 @@ export class InvestmentsStore {
     });
     this.save();
     return item;
+  }
+
+  removeTracking(id) {
+    const state = this.getState();
+    const before = state.collections.tracking.length;
+    state.collections.tracking = state.collections.tracking.filter((row) => row.id !== id);
+    if (state.collections.tracking.length === before) return false;
+    this.save();
+    return true;
+  }
+
+  matchesInstrumentEvent(event, record) {
+    if (!event || !record) return false;
+    return sameInstrument({
+      symbol: event.symbol,
+      assetClass: event.assetClass || record.assetClass,
+      markSymbol: event.markSymbol || event.yahooTicker || event.symbol,
+      yahooTicker: event.yahooTicker
+    }, record);
+  }
+
+  removeInstrumentLots(record, { dropFills = true } = {}) {
+    if (!record || !dropFills) return { events: 0, paper: 0 };
+    const state = this.getState();
+    const eventsBefore = state.collections.events.length;
+    const paperBefore = state.collections.paperTrades.length;
+    state.collections.events = state.collections.events.filter((event) => (
+      !this.matchesInstrumentEvent(event, record)
+    ));
+    state.collections.paperTrades = state.collections.paperTrades.filter((trade) => (
+      !this.matchesInstrumentEvent(trade, record)
+    ));
+    this.save();
+    return {
+      events: eventsBefore - state.collections.events.length,
+      paper: paperBefore - state.collections.paperTrades.length
+    };
+  }
+
+  addWatchFill(id, fill = {}) {
+    const state = this.getState();
+    const item = state.collections.tracking.find((row) => row.id === id);
+    if (!item) return null;
+    const side = String(fill.side || '').toUpperCase() === 'SELL' ? 'SELL' : 'BUY';
+    const quantity = fill.quantity == null || fill.quantity === '' ? 1 : Number(fill.quantity);
+    const price = fill.price == null || fill.price === '' ? null : Number(fill.price);
+    if (!Number.isFinite(quantity) || quantity <= 0) return null;
+    if (!Number.isFinite(price)) return null;
+    const entry = {
+      id: fill.id || `fill_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+      side,
+      date: fill.date || null,
+      quantity,
+      price,
+      createdAt: fill.createdAt || Date.now(),
+      source: fill.source || 'watch'
+    };
+    item.fills = Array.isArray(item.fills) ? item.fills.slice() : [];
+    item.fills.push(entry);
+    item.history = Array.isArray(item.history) ? item.history.slice() : [];
+    item.history.push({
+      action: side === 'SELL' ? 'sold' : 'bought',
+      date: entry.date,
+      price: entry.price,
+      quantity: entry.quantity,
+      at: entry.createdAt
+    });
+    if (item.status === 'stopped') item.status = 'active';
+    this.save();
+    return entry;
+  }
+
+  updateRealUnitCost(record, unitCost) {
+    if (!record || !Number.isFinite(unitCost)) return 0;
+    const state = this.getState();
+    let updated = 0;
+    for (const event of state.collections.events) {
+      if (!this.matchesInstrumentEvent(event, record)) continue;
+      if (event.activityType !== 'buy') continue;
+      event.price = unitCost;
+      if (Number.isFinite(event.quantity)) {
+        event.costBasis = unitCost * Math.abs(event.quantity);
+      }
+      updated += 1;
+    }
+    this.save();
+    return updated;
+  }
+
+  applyInstrumentClass(id, patch = {}) {
+    const item = this.collection('tracking').find((row) => row.id === id);
+    if (!item) return null;
+    const next = {
+      assetClass: patch.assetClass || item.assetClass,
+      yahooTicker: patch.yahooTicker || item.yahooTicker,
+      symbol: patch.symbol || item.symbol,
+      listedSymbol: item.listedSymbol || item.symbol
+    };
+    const markSymbol = markSymbolFor(next);
+    return this.updateTracking(id, {
+      ...next,
+      markSymbol,
+      needsInstrumentClass: false
+    });
   }
 
   allFillEvents() {

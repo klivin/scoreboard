@@ -1092,12 +1092,14 @@ After updates, users may need to clear browser cache to see changes. Hard refres
 - Do not commit real E*TRADE activity files. Tests use synthetic rows with the same columns.
 - No keys. No trades. Not Pooli.
 
-**Primary UI — Watch / Track rows (TRACKING):**
-- Add symbol + target price. Direction defaults to **long / call / buy**. Short / put / sell is optional.
-- Start date is a `<input type="date">`, default today. Optional entry/start mark; if omitted, the first successful ingest close freezes start mark (or the close on/before start date).
-- **Refresh prices** uses the same incremental ingest as Overview: `POST /api/refresh?symbol=` then `GET /api/indicators?interval=1d` (Yahoo `stock-public` for equities, OKX for crypto). Last finite close is the live mark. Empty/failed fetch stays **missing** — never a fake price.
-- Each row: symbol, start date, **cost/entry if a REAL lot exists** otherwise start mark, live mark, % gain/loss, target, in-range badge.
-- **In-zone:** long with no lot → buy zone when mark ≤ target (open). Long with a REAL lot → sell zone when mark ≥ target (close). Short is the inverse. Optional target-to is an inclusive range. In-zone rows are highlighted and pinned to the top.
+**Primary UI — Watch / Track rows:**
+- Add symbol + **instrument class** (`crypto` | `etf` | `equity`) + target. Class defaults to crypto when OKX knows the ticker, else equity. ETF requires a Yahoo ticker (IBIT, FBTC, ETHA, FETH, …). Same ticker may exist twice if class differs.
+- Display is the priced ticker + venue: `BTC · coin`, `IBIT · ETF`, `CDNS · equity`.
+- Start date is a `<input type="date">`, default today. Optional entry/start mark; if omitted, the first successful ingest close freezes start mark (or the close on/before start date). Add also **auto-refreshes** Price.
+- **Refresh prices** uses the same incremental ingest as Overview: `POST /api/refresh?symbol=&assetClass=` then `GET /api/indicators?interval=1d` (Yahoo `stock-public` for etf/equity, OKX for crypto). Last finite close is **Price**, with as-of date. Empty/failed fetch stays **missing** — never a fake price. Imported IBIT/FBTC/ETHA are not refreshed as OKX BTC/ETH.
+- Each parent row: instrument, start, cost/entry or start mark, **Price** + as-of, %, target, zone, actions (**Bought / Sold / Edit cost / Remove**). No TRACKING badge on every row. Remove works on watches and imported REAL lots (confirm; default drop fills). There is no “history kept” dead-end.
+- **Bought / Sold** record per-symbol fills as **sub-rows** under that parent (date, side, qty, fill price, $/% vs Price). Not a global ledger as the primary screen. Leftover qty is a lot → sell zone when Price ≥ target; a full sell returns to buy-zone watch.
+- **In-zone:** long with no lot → buy zone when Price ≤ target (open). Long with leftover qty (import or Bought) → sell zone when Price ≥ target (close). Short is the inverse. Missing Price or target → —. In-zone rows are highlighted and pinned to the top.
 
 **Secondary UI — REAL positions:**
 - Imported E*TRADE lots only. Distinct REAL badge. Never mixed with TRACKING P&amp;L.
@@ -1112,7 +1114,7 @@ scoreboard.investments
   collections.rawTransactions   # original parsed rows
   collections.events            # normalized events (REAL from import)
   collections.paperTrades       # TRACKING paper BUY/SELL
-  collections.tracking          # watch rows: symbol, startDate, startMark, targetPrice, targetHigh, direction
+  collections.tracking          # watch rows: symbol, assetClass, yahooTicker, markSymbol, startDate, startMark, targetPrice, fills[]
   collections.symbolMaps        # explicit symbol/CUSIP remaps only
   collections.settings          # costMethod fifo | average
 ```
@@ -1135,11 +1137,18 @@ scoreboard.investments
 
 **Export:** client-side JSON/CSV download via Blob. No server round-trip.
 
-**Files:** `public/js/investments/watch.js` (row math), `marks.js` (last finite close + refresh), `csv.js` / `parse.js` (Activity + Positions), `view.js` (watchlist-first HTML).
+**Files:** `public/js/investments/instrument.js` (class / ETF tickers), `watch.js` (row math + fills), `marks.js` (Price + as-of refresh), `csv.js` / `parse.js` (Activity + Positions), `view.js` (watchlist-first HTML).
 
 ---
 
 ## Changelog
+
+### Watch / Track venue, Price, Remove, Bought/Sold
+- Instrument class `crypto` | `etf` | `equity` on every row; `BTC · coin` vs `IBIT · ETF` vs `CDNS · equity`
+- Add auto-refreshes Price (`POST /api/refresh?symbol=&assetClass=`); as-of shown next to Price
+- Imported E*TRADE tickers stay listed (IBIT/FBTC/ETHA); bare BTC/ETH needs a venue picker — no silent OKX spot
+- Remove on every row (default drop fills). Bought/Sold fills are per-symbol sub-rows, not a primary ledger
+- Status: **doing** in code + `npm test` (267)
 
 ### Dynamic US equities + Chat load-then-research (CDNS)
 - `resolve_assets` is no longer catalog-only: well-formed US tickers (CDNS, …) resolve as `equity:SYM`
@@ -1185,8 +1194,10 @@ scoreboard.investments
 - Status: **doing**
 
 ### Investments / Watch / Track
-- Tab primary UI is a **watchlist** (symbol, start, entry or start mark, live mark, %, target, in-zone badge). Ledger is in `<details>`
-- Watch add: target + date picker (default today) + long/call/buy default. Refresh uses Overview ingest (Yahoo / OKX). No invented prices
+- Tab primary UI is a **watchlist** (instrument · venue, start, entry, Price + as-of, %, target, zone, Bought/Sold/Remove). Ledger stays in `<details>` — not the primary screen
+- Venue/class `crypto` | `etf` | `equity`; ETF Yahoo ticker required; imported IBIT/ETHA stay listed tickers (never OKX BTC/ETH spot)
+- Watch add auto-refreshes Price. Target upserts on the same instrument. Remove on every row (default drop fills)
+- Bought/Sold fills are **sub-rows per symbol**. Leftover qty → sell zone; flat → buy zone
 - In-zone: buy zone / sell zone for open vs close; in-zone rows pinned and highlighted
 - REAL positions secondary: cost, mark, unrealized $, %
 - E*TRADE Positions: Cost Basis / Average Cost → lot cost; Last Price is mark only (not basis)
