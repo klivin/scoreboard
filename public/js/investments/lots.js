@@ -172,6 +172,9 @@ function finalizeBucket(symbols, extras, markPrices) {
       : null;
 
     if (qty > 0) {
+      const unrealizedPct = Number.isFinite(basis) && basis !== 0 && positionUnrealized != null
+        ? positionUnrealized / basis
+        : missingMetric();
       positions.push({
         symbol,
         quantity: qty,
@@ -179,6 +182,7 @@ function finalizeBucket(symbols, extras, markPrices) {
         averagePrice: qty > 0 && Number.isFinite(basis) ? basis / qty : missingMetric(),
         markPrice: Number.isFinite(mark) ? mark : missingMetric(),
         unrealizedPnl: positionUnrealized,
+        unrealizedPct,
         lots: remainingLots
       });
       costBasis = addFinite(costBasis, basis);

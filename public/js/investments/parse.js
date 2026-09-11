@@ -125,18 +125,68 @@ export function eventFingerprint(event) {
   ].join('|');
 }
 
+function unitCostFromBasis(quantity, costBasisTotal, averageCost) {
+  if (Number.isFinite(averageCost)) return averageCost;
+  if (Number.isFinite(costBasisTotal) && Number.isFinite(quantity) && quantity !== 0) {
+    return Math.abs(costBasisTotal) / Math.abs(quantity);
+  }
+  return null;
+}
+
+export function resolveImportedUnitCost(record, options = {}) {
+  const quantity = parseOptionalNumber(record && record.Quantity);
+  const listedPrice = parseOptionalNumber(record && record.Price);
+  const lastPrice = parseOptionalNumber(record && record.LastPrice);
+  const costBasisTotal = parseOptionalNumber(record && record.CostBasis);
+  const averageCost = parseOptionalNumber(record && record.AverageCost);
+  const kind = options.kind || 'activity';
+
+  if (kind === 'positions') {
+    const unit = unitCostFromBasis(quantity, costBasisTotal, averageCost);
+    return {
+      quantity,
+      price: unit,
+      lastPrice: lastPrice != null ? lastPrice : listedPrice,
+      costBasisTotal,
+      averageCost,
+      usedCostBasisColumn: unit != null
+    };
+  }
+
+  let price = listedPrice;
+  if (price == null) {
+    price = unitCostFromBasis(quantity, costBasisTotal, averageCost);
+  }
+  return {
+    quantity,
+    price,
+    lastPrice,
+    costBasisTotal,
+    averageCost,
+    usedCostBasisColumn: listedPrice == null && price != null
+  };
+}
+
 export function normalizeRow(row, options = {}) {
   const record = row.record || {};
   const maps = options.symbolMaps || [];
   const badge = options.badge || 'REAL';
   const source = options.source || 'import';
+  const kind = options.kind || 'activity';
 
-  const activityDate = parseOptionalDate(record['Activity/Trade Date'] || record['Transaction Date']);
+  const activityDate = parseOptionalDate(
+    record['Activity/Trade Date'] || record['Transaction Date'] || record.AsOfDate
+  );
   const transactionDate = parseOptionalDate(record['Transaction Date']);
   const settlementDate = parseOptionalDate(record['Settlement Date']);
-  const activityType = classifyActivityType(record['Activity Type']);
-  const quantity = parseOptionalNumber(record.Quantity);
-  const price = parseOptionalNumber(record.Price);
+  let activityType = classifyActivityType(record['Activity Type']);
+  if (kind === 'positions' && (!record['Activity Type'] || activityType === 'unsupported')) {
+    activityType = 'buy';
+  }
+
+  const cost = resolveImportedUnitCost(record, { kind });
+  const quantity = cost.quantity;
+  const price = cost.price;
   const amount = parseOptionalNumber(record.Amount);
   const commission = parseOptionalNumber(record.Commission);
   const mapped = applySymbolMaps(record.Symbol, record.Cusip, maps);
@@ -154,20 +204,26 @@ export function normalizeRow(row, options = {}) {
     lineNumber: row.lineNumber || null,
     source,
     badge,
+    importKind: kind,
     activityDate: activityDate && activityDate.iso ? activityDate.iso : null,
     activityDateDisplay: activityDate ? activityDate.display : null,
     transactionDate: transactionDate && transactionDate.iso ? transactionDate.iso : null,
     settlementDate: settlementDate && settlementDate.iso ? settlementDate.iso : null,
     activityType,
-    description: emptyToMissing(record.Description),
+    description: emptyToMissing(record.Description)
+      || (kind === 'positions' ? 'Positions snapshot' : null),
     symbol: mapped.symbol ? String(mapped.symbol).toUpperCase() : null,
     symbolRaw: emptyToMissing(record.Symbol),
     cusip: mapped.cusip,
     quantity,
     price,
+    lastPrice: cost.lastPrice,
+    costBasis: Number.isFinite(cost.costBasisTotal)
+      ? cost.costBasisTotal
+      : (Number.isFinite(price) && Number.isFinite(quantity) ? price * Math.abs(quantity) : null),
     amount,
     commission,
-    category: emptyToMissing(record.Category),
+    category: emptyToMissing(record.Category) || (kind === 'positions' ? 'positions-snapshot' : null),
     note: emptyToMissing(record.Note),
     mapped: mapped.mapped,
     mapId: mapped.mapId,
@@ -178,7 +234,8 @@ export function normalizeRow(row, options = {}) {
       unsupported: activityType === 'unsupported',
       noFillInferred: !fillEligible,
       needsExplicitMapping: needsMapping,
-      unparsedDate: Boolean(activityDate && activityDate.unparsed)
+      unparsedDate: Boolean(activityDate && activityDate.unparsed),
+      usedCostBasisColumn: Boolean(cost.usedCostBasisColumn)
     }
   };
   event.fingerprint = eventFingerprint(event);

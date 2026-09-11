@@ -33,11 +33,12 @@ Scoreboard is a crypto market analysis and forecasting dashboard built with vani
 **Investments (browser-local, not the chart store)** (`public/js/investments/`)
 - `schema.js` - `schemaVersion` + collection namespaces + migrations
 - `store.js` - `localStorage` key `scoreboard.investments` only (never `store/*.json`)
-- `csv.js` / `parse.js` / `validate.js` - Activity CSV parse (header-row scan + `#`/`$` header normalize + trailing disclaimer skip), preview
+- `csv.js` / `parse.js` / `validate.js` - Activity + Positions CSV parse (header-row scan + `#`/`$`/`()` header normalize + Cost Basis aliases + trailing disclaimer skip), preview
 - `lots.js` - FIFO and average-cost lots, P&L, drawdown (REAL and TRACKING separate)
-- `tracking.js` - paper BUY/SELL + start/stop tracking (always TRACKING)
+- `tracking.js` / `watch.js` - paper BUY/SELL + watch rows (target / in-zone / %; always TRACKING)
+- `marks.js` - last finite close + Overview ingest refresh (Yahoo / OKX; never invent)
 - `markers.js` / `export.js` - chart marker payloads + local CSV/JSON export
-- `view.js` / `controller.js` - Investments tab UI (FileReader; no upload)
+- `view.js` / `controller.js` - Watch / Track tab UI (watchlist first; FileReader; no upload)
 
 **View** (`public/js/view.js`, `public/js/chart-view.js`, `public/js/scanner/`)
 - `ChartView` - Lightweight Charts price chart (pan/zoom, overlays, drawings)
@@ -1081,15 +1082,28 @@ After updates, users may need to clear browser cache to see changes. Hard refres
 
 ---
 
-## Investments (local-only)
+## Investments / Watch / Track (local-only)
 
-**Status:** doing (first slice). Separate functional tab from Overview/Forecasts/Universe.
+**Status:** doing. The **Watch / Track** tab (nav label; `data-tab="investments"`) is a watchlist for deciding **open vs close**, not a transaction ledger.
 
 **Privacy:**
 - Import is `<input type="file">` + `FileReader` in the browser. The raw CSV is never POSTed, never written under `store/`, and never sent to Firestore.
 - UI shows a prominent warning: the file stays in this browser / local store and is not transmitted.
 - Do not commit real E*TRADE activity files. Tests use synthetic rows with the same columns.
 - No keys. No trades. Not Pooli.
+
+**Primary UI — Watch / Track rows (TRACKING):**
+- Add symbol + target price. Direction defaults to **long / call / buy**. Short / put / sell is optional.
+- Start date is a `<input type="date">`, default today. Optional entry/start mark; if omitted, the first successful ingest close freezes start mark (or the close on/before start date).
+- **Refresh prices** uses the same incremental ingest as Overview: `POST /api/refresh?symbol=` then `GET /api/indicators?interval=1d` (Yahoo `stock-public` for equities, OKX for crypto). Last finite close is the live mark. Empty/failed fetch stays **missing** — never a fake price.
+- Each row: symbol, start date, **cost/entry if a REAL lot exists** otherwise start mark, live mark, % gain/loss, target, in-range badge.
+- **In-zone:** long with no lot → buy zone when mark ≤ target (open). Long with a REAL lot → sell zone when mark ≥ target (close). Short is the inverse. Optional target-to is an inclusive range. In-zone rows are highlighted and pinned to the top.
+
+**Secondary UI — REAL positions:**
+- Imported E*TRADE lots only. Distinct REAL badge. Never mixed with TRACKING P&amp;L.
+- Columns: qty, **cost**, **mark**, **unrealized $**, **%**. Mark comes from live ingest (or Positions Last Price as a hint until refresh). Cost never comes from Last Price.
+
+**Ledger is buried:** fills / paper / maps live in `<details id="inv-ledger">` (and advanced details). Not the first thing on the page.
 
 **Store (schema-versioned):**
 ```
@@ -1098,26 +1112,30 @@ scoreboard.investments
   collections.rawTransactions   # original parsed rows
   collections.events            # normalized events (REAL from import)
   collections.paperTrades       # TRACKING paper BUY/SELL
-  collections.tracking          # start/stop watch records (history preserved)
+  collections.tracking          # watch rows: symbol, startDate, startMark, targetPrice, targetHigh, direction
   collections.symbolMaps        # explicit symbol/CUSIP remaps only
   collections.settings          # costMethod fifo | average
 ```
 
-**REAL vs TRACKING:** confirmed imported holdings/transactions are REAL. Watchlist, paper marks, and start/stop tracking are TRACKING. Badges appear in the tab, P&L panels, and chart markers. P&L is never mixed across badges.
+**REAL vs TRACKING:** confirmed imported holdings are REAL. Watchlist, paper marks, and start/stop tracking are TRACKING. Badges never mix P&L.
 
-**CSV header scan:** E*TRADE Activity files start with a title / account / `Total:` preamble. The parser scans for a row containing `Activity/Trade Date` (or both `Activity Type` and `Symbol`) and reads data from there. Header names are matched case-insensitively after stripping trailing `#` / `$` / spaces (`Quantity #` → Quantity, `Price $` → Price, `Amount $` → Amount).
+**CSV header scan:** E*TRADE Activity files start with a title / account / `Total:` preamble. The parser scans for a row containing `Activity/Trade Date` (or both `Activity Type` and `Symbol`) and reads data from there. Header names are matched case-insensitively after stripping `#` / `$` / `()` / spaces (`Quantity #` → Quantity, `Price $` → Price, `Amount $` → Amount, `Cost Basis $` → CostBasis, `Last Price $` → LastPrice).
+
+**Positions snapshot:** if there is no Activity header, a row with Symbol + Quantity + (Cost Basis | Average Cost | Last Price | Price) is a Positions file. **Cost Basis / Average Cost → lot unit cost. Last Price / Price → mark hint only, never cost.** A Positions row with only Last Price and no cost stays missing (no fill inferred).
 
 **CSV footer skip:** After the first accepted activity row, parsing stops at a blank gap, at two consecutive non-dated non-activity rows, or at disclaimer prose (`Morgan Stanley`, `Brokerage services are offered`, `Member SIPC`). Trailing legal paragraphs are dropped — they are not unsupported trades.
 
 **Activity types (E*TRADE):** Bought / Sold → buy/sell fills when qty+price exist. Bought To Open / Sold To Close (and other to-open/to-close) → `option` events, **not** share lots on the underlying symbol. Dividend / Qualified Dividend → dividend (non-fill; missing qty/price stays missing). Option Expired → expired (non-fill; empty price stays missing, never a 0 fill). Exchange Delivered Out / Exchange Received In → exchange (non-fill; explicit map + user cost required). Symbol `--` stays missing — no inference. Unsupported types are flagged per row and do not abort the import.
 
-**Fills:** a buy/sell becomes a lot fill only when **both** quantity and price are present. Missing quantity or price is marked; no fill is inferred. Dividends, fees, exchanges, and options/expired do not invent fills or contracts. Exchanges / ticker changes / options require an explicit symbol map. An option-contract map still does not open FIFO share lots.
+**Fills:** a buy/sell becomes a lot fill only when **both** quantity and price are present. Missing quantity or price is marked; no fill is inferred. On Activity rows, if Price is empty but Cost Basis + qty exist, unit cost is `|Cost Basis| / |qty|` (mapping an explicit cost column, not inventing). Dividends, fees, exchanges, and options/expired do not invent fills or contracts. Exchanges / ticker changes / options require an explicit symbol map. An option-contract map still does not open FIFO share lots.
 
 **P&L:** FIFO (default) or average-cost. Realized, unrealized, cost basis, return, dividends, drawdown. Missing mark prices stay `missing`, not `0`.
 
-**Charts:** transaction markers on the Overview asset chart (exact date, qty, price, fees, source, badge). Click/tap opens a detail strip.
+**Charts:** transaction markers on the Overview asset chart (exact date, qty, price, fees, source, badge). Click/tap opens a detail strip. Overview Load Data also writes that symbol’s last close into Investments marks.
 
 **Export:** client-side JSON/CSV download via Blob. No server round-trip.
+
+**Files:** `public/js/investments/watch.js` (row math), `marks.js` (last finite close + refresh), `csv.js` / `parse.js` (Activity + Positions), `view.js` (watchlist-first HTML).
 
 ---
 
@@ -1166,17 +1184,16 @@ scoreboard.investments
 - Flip history recorded on consensus/direction change
 - Status: **doing**
 
-### Investments tab (first slice, local-only)
-- Investments tab: empty state, privacy warning, local file import, preview + Commit
-- Schema-versioned `scoreboard.investments` store; REAL vs TRACKING never mix
-- FIFO + average-cost lots; paper BUY/SELL; start/stop tracking preserves history
-- Transaction markers on asset charts; local CSV/JSON export
-- Activity CSV: scan for the real header after E*TRADE preamble; normalize `Quantity #` / `Price $` / `Amount $` (**done**, 2026-09-05; synthetic fixture only)
+### Investments / Watch / Track
+- Tab primary UI is a **watchlist** (symbol, start, entry or start mark, live mark, %, target, in-zone badge). Ledger is in `<details>`
+- Watch add: target + date picker (default today) + long/call/buy default. Refresh uses Overview ingest (Yahoo / OKX). No invented prices
+- In-zone: buy zone / sell zone for open vs close; in-zone rows pinned and highlighted
+- REAL positions secondary: cost, mark, unrealized $, %
+- E*TRADE Positions: Cost Basis / Average Cost → lot cost; Last Price is mark only (not basis)
+- Activity CSV: scan for the real header after E*TRADE preamble; normalize `Quantity #` / `Price $` / `Amount $` / `Cost Basis $` (**done**, 2026-09-05 + watch rewrite; synthetic fixture only)
 - Activity CSV: skip trailing Morgan Stanley / brokerage disclaimer; Bought To Open and Option Expired stay option events (not underlying share lots); Exchange `--` stays needs-mapping; empty option price stays missing (**done**, 2026-09-08; synthetic fixture only)
-- Tests: synthetic CSV only (including preamble + `#`/`$` headers + footer). Real brokerage files are not in-repo and were not imported
-- Localhost UI (synthetic CSV): empty state + privacy warning, preview/Commit, REAL vs TRACKING, paper BUY, start/stop keeps history
-- Chart markers unit-tested; live candle overlay not visually confirmed on this host (no Flow pack)
-- Status: **doing** — first-slice UI/tests passed; screenshot import and broker sync stay open
+- Tests: synthetic CSV only (Activity + Positions). Real brokerage files are not in-repo and were not imported
+- Status: **doing** — watchlist rewrite; screenshot import and broker sync stay open
 
 ### Signal engine + backtest (research, first slice)
 - Extensible strategies: EMA golden/death (true EMA50), MACD from close, RSI recovery, Ichimoku pack fields

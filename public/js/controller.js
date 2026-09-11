@@ -246,6 +246,10 @@ export class AppController {
 
     const data = await this.loadData(symbol, interval);
 
+    if (this.investments && typeof this.investments.setMarksFromSeries === 'function') {
+      this.investments.setMarksFromSeries(symbol, data);
+    }
+
     if (this.views.chart.setInterval) {
       this.views.chart.setInterval(interval);
     }

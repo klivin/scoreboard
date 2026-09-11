@@ -650,6 +650,74 @@ button:hover {
   background: #fffbeb;
 }
 
+.inv-watch {
+  margin: 8px 0 28px;
+  padding: 20px;
+  border: 2px solid #f59e0b;
+  border-radius: 10px;
+  background: #fffbeb;
+}
+
+.inv-watch h2 {
+  margin-top: 0;
+}
+
+.inv-row-inzone {
+  background: #fef3c7;
+  box-shadow: inset 4px 0 0 #d97706;
+  font-weight: 700;
+}
+
+.inv-zone-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 800;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+.inv-zone-buy {
+  background: #d1fae5;
+  color: #065f46;
+}
+
+.inv-zone-sell {
+  background: #fee2e2;
+  color: #991b1b;
+}
+
+.inv-gain {
+  color: #047857;
+  font-weight: 700;
+}
+
+.inv-loss {
+  color: #b91c1c;
+  font-weight: 700;
+}
+
+.inv-ledger,
+.inv-advanced {
+  margin: 16px 0;
+  padding: 12px 16px;
+  border: 1px dashed #d1d5db;
+  border-radius: 8px;
+  background: #f9fafb;
+}
+
+.inv-ledger summary,
+.inv-advanced summary {
+  cursor: pointer;
+  font-weight: 700;
+  color: #4b5563;
+}
+
+.inv-import-tools {
+  margin: 20px 0;
+}
+
 .inv-badge {
   display: inline-block;
   padding: 2px 8px;

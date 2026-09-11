@@ -2,6 +2,8 @@ import { InvestmentsStore } from './store.js';
 import { previewImport } from './validate.js';
 import { computeLotsAndPnl } from './lots.js';
 import { validatePaperTrade, startTrackingInput } from './tracking.js';
+import { applyStartMarkFreeze, collectWatchSymbols } from './watch.js';
+import { fetchMarksForSymbols, lastFiniteClose } from './marks.js';
 import { buildExportCsv, buildExportJson, downloadBlob } from './export.js';
 import { InvestmentsView } from './view.js';
 import { parseOptionalNumber } from './parse.js';
@@ -22,22 +24,130 @@ export class InvestmentsController {
     this.preview = null;
     this.onChange = options.onChange || null;
     this.markPrices = options.markPrices || {};
+    this.markStatus = '';
+    this.fetchImpl = options.fetchImpl || null;
+    this.refreshing = false;
+  }
+
+  importedHintMarks() {
+    const hints = {};
+    for (const event of this.store.collection('events') || []) {
+      if (event && event.symbol && Number.isFinite(event.lastPrice) && hints[event.symbol] == null) {
+        hints[event.symbol] = event.lastPrice;
+      }
+    }
+    return hints;
+  }
+
+  mergedMarks() {
+    return { ...this.importedHintMarks(), ...this.markPrices };
   }
 
   model() {
     const storeState = this.store.getState();
     const events = this.store.allFillEvents();
+    const markPrices = this.mergedMarks();
     const pnl = computeLotsAndPnl(events, {
       costMethod: this.store.getCostMethod(),
-      markPrices: this.markPrices
+      markPrices
     });
-    return { storeState, pnl, markPrices: this.markPrices };
+    return {
+      storeState,
+      pnl,
+      markPrices,
+      markStatus: this.markStatus
+    };
   }
 
   refresh() {
     this.view.render(this.model());
     this.bindWorkspace();
     if (typeof this.onChange === 'function') this.onChange(this.store);
+  }
+
+  setMark(symbol, price) {
+    const upper = String(symbol || '').trim().toUpperCase();
+    if (!upper || !Number.isFinite(price)) return;
+    this.markPrices = { ...this.markPrices, [upper]: price };
+    this.freezeStartMarks({ [upper]: price }, {});
+    this.refresh();
+  }
+
+  setMarksFromSeries(symbol, series) {
+    const last = lastFiniteClose(series);
+    if (last) this.setMark(symbol, last.close);
+  }
+
+  freezeStartMarks(marks, startCloses) {
+    const tracking = this.store.collection('tracking') || [];
+    for (const record of tracking) {
+      if (!record || record.status === 'stopped') continue;
+      const symbol = record.symbol;
+      const next = applyStartMarkFreeze(record, {
+        liveMark: marks && marks[symbol],
+        seriesStartClose: startCloses && startCloses[symbol]
+      });
+      if (next !== record && Number.isFinite(next.startMark)) {
+        this.store.updateTracking(record.id, {
+          startMark: next.startMark,
+          baselinePrice: next.baselinePrice
+        });
+      }
+    }
+  }
+
+  async refreshMarks() {
+    if (this.refreshing) return;
+    const pnl = this.model().pnl;
+    const symbols = collectWatchSymbols({
+      tracking: this.store.collection('tracking'),
+      realPositions: pnl.REAL.positions
+    });
+    if (!symbols.length) {
+      this.markStatus = 'Add a watch row or import a REAL lot, then refresh.';
+      this.refresh();
+      return;
+    }
+
+    this.refreshing = true;
+    this.markStatus = `Refreshing ${symbols.join(', ')} via Overview ingest (Yahoo / OKX)…`;
+    this.refresh();
+
+    const startDates = {};
+    for (const record of this.store.collection('tracking') || []) {
+      if (record && record.symbol && record.startDate && !startDates[record.symbol]) {
+        startDates[record.symbol] = record.startDate;
+      }
+    }
+
+    const nextMarks = { ...this.markPrices };
+    const startCloses = {};
+    const notes = [];
+    try {
+      for (const symbol of symbols) {
+        const result = await fetchMarksForSymbols([symbol], {
+          fetchImpl: this.fetchImpl || fetch,
+          startDate: startDates[symbol] || null
+        });
+        if (Number.isFinite(result.marks[symbol])) {
+          nextMarks[symbol] = result.marks[symbol];
+          notes.push(`${symbol} ${result.marks[symbol]}`);
+        } else {
+          notes.push(`${symbol} missing`);
+        }
+        if (Number.isFinite(result.startCloses[symbol])) {
+          startCloses[symbol] = result.startCloses[symbol];
+        }
+      }
+      this.markPrices = nextMarks;
+      this.freezeStartMarks(nextMarks, startCloses);
+      this.markStatus = `Marks: ${notes.join(' · ')}. Missing stays missing — prices are not invented.`;
+    } catch (error) {
+      this.markStatus = error && error.message ? error.message : 'Refresh failed';
+    } finally {
+      this.refreshing = false;
+      this.refresh();
+    }
   }
 
   async handleFile(file) {
@@ -87,8 +197,41 @@ export class InvestmentsController {
       });
     }
 
+    const watchForm = document.getElementById('inv-watch-form');
+    if (watchForm && !watchForm.dataset.bound) {
+      watchForm.dataset.bound = '1';
+      watchForm.addEventListener('submit', (event) => {
+        event.preventDefault();
+        const data = new FormData(watchForm);
+        const checked = startTrackingInput({
+          symbol: data.get('symbol'),
+          startDate: data.get('startDate'),
+          baselinePrice: parseOptionalNumber(data.get('baselinePrice')),
+          targetPrice: parseOptionalNumber(data.get('targetPrice')),
+          targetHigh: parseOptionalNumber(data.get('targetHigh')),
+          direction: data.get('direction'),
+          requireTarget: true
+        });
+        if (!checked.ok) {
+          window.alert(checked.errors.join('\n'));
+          return;
+        }
+        this.store.addTracking(checked.record);
+        this.refresh();
+      });
+    }
+
+    const refreshMarks = document.getElementById('inv-refresh-marks-btn');
+    if (refreshMarks && !refreshMarks.dataset.bound) {
+      refreshMarks.dataset.bound = '1';
+      refreshMarks.addEventListener('click', () => {
+        this.refreshMarks();
+      });
+    }
+
     const cost = document.getElementById('inv-cost-method');
-    if (cost) {
+    if (cost && !cost.dataset.bound) {
+      cost.dataset.bound = '1';
       cost.addEventListener('change', () => {
         this.store.setCostMethod(cost.value);
         this.refresh();
@@ -96,20 +239,23 @@ export class InvestmentsController {
     }
 
     const exportJson = document.getElementById('inv-export-json-btn');
-    if (exportJson) {
+    if (exportJson && !exportJson.dataset.bound) {
+      exportJson.dataset.bound = '1';
       exportJson.addEventListener('click', () => {
         downloadBlob('scoreboard-investments.json', buildExportJson(this.store.getState()), 'application/json');
       });
     }
     const exportCsv = document.getElementById('inv-export-csv-btn');
-    if (exportCsv) {
+    if (exportCsv && !exportCsv.dataset.bound) {
+      exportCsv.dataset.bound = '1';
       exportCsv.addEventListener('click', () => {
         downloadBlob('scoreboard-investments.csv', buildExportCsv(this.store.allFillEvents()), 'text/csv');
       });
     }
 
     const paperForm = document.getElementById('inv-paper-form');
-    if (paperForm) {
+    if (paperForm && !paperForm.dataset.bound) {
+      paperForm.dataset.bound = '1';
       paperForm.addEventListener('submit', (event) => {
         event.preventDefault();
         const data = new FormData(paperForm);
@@ -131,36 +277,22 @@ export class InvestmentsController {
       });
     }
 
-    const trackForm = document.getElementById('inv-track-form');
-    if (trackForm) {
-      trackForm.addEventListener('submit', (event) => {
-        event.preventDefault();
-        const data = new FormData(trackForm);
-        const checked = startTrackingInput({
-          symbol: data.get('symbol'),
-          startDate: data.get('startDate'),
-          baselinePrice: parseOptionalNumber(data.get('baselinePrice'))
-        });
-        if (!checked.ok) {
-          window.alert(checked.errors.join('\n'));
-          return;
-        }
-        this.store.addTracking(checked.record);
-        this.refresh();
-      });
-    }
-
     document.querySelectorAll('.inv-stop-btn').forEach((btn) => {
       btn.addEventListener('click', () => {
         const id = btn.dataset.trackId;
         const today = new Date().toISOString().slice(0, 10);
-        this.store.stopTracking(id, { stopDate: today, stopPrice: null });
+        const row = (this.store.collection('tracking') || []).find((r) => r.id === id);
+        const stopPrice = row && Number.isFinite(this.markPrices[row.symbol])
+          ? this.markPrices[row.symbol]
+          : null;
+        this.store.stopTracking(id, { stopDate: today, stopPrice });
         this.refresh();
       });
     });
 
     const mapForm = document.getElementById('inv-map-form');
-    if (mapForm) {
+    if (mapForm && !mapForm.dataset.bound) {
+      mapForm.dataset.bound = '1';
       mapForm.addEventListener('submit', (event) => {
         event.preventDefault();
         const data = new FormData(mapForm);

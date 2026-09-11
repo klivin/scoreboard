@@ -3,7 +3,10 @@ import assert from 'node:assert';
 import {
   buildSyntheticCsv,
   buildEtradePreambleCsv,
+  buildEtradePositionsCsv,
   parseActivityCsv,
+  parsePositionsCsv,
+  parseBrokerageCsv,
   CANONICAL_COLUMNS,
   ETRADE_SYNTHETIC_FOOTER,
   normalizeHeader,
@@ -11,7 +14,7 @@ import {
   isFooterProseText,
   isNonDatedNonActivityRecord
 } from './investments/csv.js';
-import { classifyActivityType, normalizeRows, parseOptionalNumber } from './investments/parse.js';
+import { classifyActivityType, normalizeRows, parseOptionalNumber, resolveImportedUnitCost } from './investments/parse.js';
 import { previewImport, validateEvents } from './investments/validate.js';
 import {
   INVESTMENTS_SCHEMA_VERSION,
@@ -24,6 +27,14 @@ import { computeLotsAndPnl, formatMissing } from './investments/lots.js';
 import { buildTransactionMarker, buildTransactionMarkers, formatMarkerDetail } from './investments/markers.js';
 import { startTrackingInput, trackingForwardPerformance, validatePaperTrade } from './investments/tracking.js';
 import { buildExportCsv, buildExportJson } from './investments/export.js';
+import {
+  buildWatchRows,
+  evaluateTargetZone,
+  sortWatchRows,
+  watchReturnPct
+} from './investments/watch.js';
+import { lastFiniteClose, closeOnOrBeforeDate, markFromIndicatorsPayload } from './investments/marks.js';
+import { isPrimaryViewWatchlist, renderWorkspaceHtml } from './investments/view.js';
 
 const SYNTHETIC_HEADERS = CANONICAL_COLUMNS;
 
@@ -888,3 +899,242 @@ test('E*TRADE follow-up: options stay off share lots; empty option price missing
     s.event.note === 'synthetic-bought-to-open' && s.reason === 'option_not_share_lot'
   )));
 });
+
+test('watch row % uses start mark; short inverts; missing stays missing', () => {
+  assert.ok(Math.abs(watchReturnPct({ startMark: 100, mark: 110, direction: 'long' }) - 0.1) < 1e-9);
+  assert.ok(Math.abs(watchReturnPct({ startMark: 100, mark: 110, direction: 'put' }) + 0.1) < 1e-9);
+  assert.strictEqual(watchReturnPct({ startMark: 100, mark: null }), null);
+  assert.strictEqual(watchReturnPct({ startMark: 0, mark: 10 }), null);
+  assert.strictEqual(watchReturnPct({ startMark: null, mark: 10 }), null);
+});
+
+test('in-zone: long open is buy-at-or-below; long with lot is sell-at-or-above', () => {
+  const buy = evaluateTargetZone({ mark: 95, target: 100, direction: 'long', hasRealLot: false });
+  assert.strictEqual(buy.inZone, true);
+  assert.strictEqual(buy.zone, 'buy');
+  assert.strictEqual(buy.badge, 'buy zone');
+
+  const notBuy = evaluateTargetZone({ mark: 120, target: 100, direction: 'long', hasRealLot: false });
+  assert.strictEqual(notBuy.inZone, false);
+  assert.strictEqual(notBuy.badge, null);
+
+  const sell = evaluateTargetZone({ mark: 120, target: 100, direction: 'long', hasRealLot: true });
+  assert.strictEqual(sell.inZone, true);
+  assert.strictEqual(sell.zone, 'sell');
+
+  const range = evaluateTargetZone({
+    mark: 105,
+    target: 100,
+    targetHigh: 110,
+    direction: 'long',
+    hasRealLot: false
+  });
+  assert.strictEqual(range.inZone, true);
+  assert.strictEqual(range.zone, 'buy');
+
+  const shortOpen = evaluateTargetZone({ mark: 130, target: 120, direction: 'short', hasRealLot: false });
+  assert.strictEqual(shortOpen.inZone, true);
+  assert.strictEqual(shortOpen.zone, 'sell');
+
+  assert.strictEqual(evaluateTargetZone({ mark: null, target: 100 }).inZone, false);
+});
+
+test('in-zone watch rows pin above others', () => {
+  const rows = buildWatchRows({
+    tracking: [
+      { id: 'a', symbol: 'ZZZ', startDate: '2026-09-11', baselinePrice: 10, targetPrice: 5, direction: 'long', status: 'active' },
+      { id: 'b', symbol: 'AAA', startDate: '2026-09-11', baselinePrice: 10, targetPrice: 20, direction: 'long', status: 'active' }
+    ],
+    markPrices: { ZZZ: 12, AAA: 8 }
+  });
+  assert.strictEqual(rows[0].symbol, 'AAA');
+  assert.strictEqual(rows[0].inZone, true);
+  assert.strictEqual(rows[0].zoneBadge, 'buy zone');
+  assert.ok(Math.abs(rows[0].returnPct - ((8 - 10) / 10)) < 1e-9);
+  assert.strictEqual(rows[1].symbol, 'ZZZ');
+  assert.strictEqual(rows[1].inZone, false);
+  const sorted = sortWatchRows([{ symbol: 'M', inZone: false }, { symbol: 'B', inZone: true }]);
+  assert.strictEqual(sorted[0].symbol, 'B');
+});
+
+test('watch row uses real cost/entry when a REAL lot exists', () => {
+  const rows = buildWatchRows({
+    tracking: [
+      { id: 't', symbol: 'FAKE1', startDate: '2026-09-11', baselinePrice: 99, targetPrice: 40, direction: 'long', status: 'active' }
+    ],
+    realPositions: [{ symbol: 'FAKE1', quantity: 6, costBasis: 150, averagePrice: 25 }],
+    markPrices: { FAKE1: 40 }
+  });
+  assert.strictEqual(rows[0].entry, 25);
+  assert.strictEqual(rows[0].entryKind, 'cost');
+  assert.strictEqual(rows[0].hasRealLot, true);
+  assert.strictEqual(rows[0].inZone, true);
+  assert.strictEqual(rows[0].zone, 'sell');
+});
+
+test('normalizeHeader maps E*TRADE Cost Basis / Last Price columns', () => {
+  assert.strictEqual(normalizeHeader('Cost Basis $'), 'cost basis');
+  assert.strictEqual(normalizeHeader('Cost Basis ($)'), 'cost basis');
+  assert.strictEqual(mapHeader('Cost Basis $'), 'CostBasis');
+  assert.strictEqual(mapHeader('Average Cost $'), 'AverageCost');
+  assert.strictEqual(mapHeader('Last Price $'), 'LastPrice');
+  assert.strictEqual(mapHeader('Market Value $'), 'MarketValue');
+  assert.strictEqual(mapHeader('Quantity #'), 'Quantity');
+});
+
+function etradePositionsRows() {
+  return [
+    {
+      Symbol: 'FAKE1',
+      Quantity: '6',
+      LastPrice: '40',
+      CostBasis: '150',
+      AverageCost: '25',
+      MarketValue: '240'
+    },
+    {
+      Symbol: 'FAKE2',
+      Quantity: '2',
+      LastPrice: '10',
+      CostBasis: '',
+      AverageCost: '5',
+      MarketValue: '20'
+    },
+    {
+      Symbol: 'FAKE3',
+      Quantity: '1',
+      LastPrice: '99',
+      CostBasis: '',
+      AverageCost: '',
+      MarketValue: '99'
+    }
+  ];
+}
+
+test('E*TRADE Positions: Cost Basis is lot cost; Last Price is mark not basis', () => {
+  const csv = buildEtradePositionsCsv(etradePositionsRows(), { footer: true });
+  assert.ok(csv.includes('Last Price $,Cost Basis $,Average Cost $'));
+  assert.ok(!/FAKE\d{4,}/.test(csv));
+
+  const parsed = parsePositionsCsv(csv);
+  assert.strictEqual(parsed.kind, 'positions');
+  assert.ok(parsed.canonicalHeaders.includes('CostBasis'));
+  assert.ok(parsed.canonicalHeaders.includes('LastPrice'));
+  assert.ok(parsed.canonicalHeaders.includes('AverageCost'));
+  assert.strictEqual(parsed.rows.length, 3);
+
+  const viaBroker = parseBrokerageCsv(csv);
+  assert.strictEqual(viaBroker.kind, 'positions');
+
+  const cost = resolveImportedUnitCost(parsed.rows[0].record, { kind: 'positions' });
+  assert.strictEqual(cost.price, 25);
+  assert.strictEqual(cost.lastPrice, 40);
+  assert.notStrictEqual(cost.price, cost.lastPrice);
+
+  const preview = previewImport(csv, { idPrefix: 'pos_syn' });
+  assert.strictEqual(preview.kind, 'positions');
+  assert.strictEqual(preview.privacy.serverReceivesCsv, false);
+  assert.strictEqual(preview.canCommit, true);
+
+  const fake1Event = preview.events.find((e) => e.symbol === 'FAKE1');
+  assert.strictEqual(fake1Event.price, 25);
+  assert.strictEqual(fake1Event.lastPrice, 40);
+  assert.strictEqual(fake1Event.costBasis, 150);
+  assert.strictEqual(fake1Event.activityType, 'buy');
+  assert.strictEqual(fake1Event.badge, 'REAL');
+
+  const fake3 = preview.events.find((e) => e.symbol === 'FAKE3');
+  assert.strictEqual(fake3.price, null);
+  assert.strictEqual(fake3.lastPrice, 99);
+  assert.strictEqual(fake3.flags.missingPrice, true);
+  assert.strictEqual(fake3.flags.noFillInferred, true);
+
+  const pnl = computeLotsAndPnl(preview.events, {
+    costMethod: 'fifo',
+    markPrices: { FAKE1: 40, FAKE2: 10 }
+  });
+  const fake1 = pnl.REAL.positions.find((p) => p.symbol === 'FAKE1');
+  assert.ok(fake1);
+  assert.strictEqual(fake1.quantity, 6);
+  assert.strictEqual(fake1.costBasis, 150);
+  assert.strictEqual(fake1.averagePrice, 25);
+  assert.strictEqual(fake1.markPrice, 40);
+  assert.strictEqual(fake1.unrealizedPnl, 90);
+  assert.ok(Math.abs(fake1.unrealizedPct - 0.6) < 1e-9);
+  assert.notStrictEqual(fake1.costBasis, 240);
+
+  const fake2 = pnl.REAL.positions.find((p) => p.symbol === 'FAKE2');
+  assert.strictEqual(fake2.costBasis, 10);
+  assert.strictEqual(fake2.unrealizedPnl, 10);
+  assert.strictEqual(pnl.REAL.positions.find((p) => p.symbol === 'FAKE3'), undefined);
+});
+
+test('Activity CSV still uses fill Price; Cost Basis fills only when Price is missing', () => {
+  const withPrice = resolveImportedUnitCost({
+    Quantity: '10',
+    Price: '25',
+    CostBasis: '999'
+  }, { kind: 'activity' });
+  assert.strictEqual(withPrice.price, 25);
+
+  const noPrice = resolveImportedUnitCost({
+    Quantity: '10',
+    Price: '',
+    CostBasis: '250'
+  }, { kind: 'activity' });
+  assert.strictEqual(noPrice.price, 25);
+  assert.strictEqual(noPrice.usedCostBasisColumn, true);
+});
+
+test('lastFiniteClose and start-date close never invent prices', () => {
+  const series = [
+    { date_utc: '2026-09-09', close: 10, timestamp: 1 },
+    { date_utc: '2026-09-10', close: null, timestamp: 2 },
+    { date_utc: '2026-09-11', close: 12, timestamp: 3 }
+  ];
+  assert.strictEqual(lastFiniteClose(series).close, 12);
+  assert.strictEqual(closeOnOrBeforeDate(series, '2026-09-10').close, 10);
+  assert.strictEqual(markFromIndicatorsPayload({ error: 'missing' }), null);
+  assert.strictEqual(lastFiniteClose([]), null);
+  assert.strictEqual(lastFiniteClose([{ close: null }]), null);
+});
+
+test('primary Investments workspace is the watchlist, not the ledger', () => {
+  const state = emptyState();
+  state.collections.tracking.push({
+    id: 'w1',
+    symbol: 'CDNS',
+    startDate: '2026-09-11',
+    baselinePrice: 280,
+    targetPrice: 300,
+    direction: 'long',
+    status: 'active'
+  });
+  state.collections.events.push({
+    activityDate: '2026-08-10',
+    activityType: 'buy',
+    symbol: 'FAKE1',
+    quantity: 6,
+    price: 25,
+    badge: 'REAL',
+    source: 'import'
+  });
+  const pnl = computeLotsAndPnl(state.collections.events, {
+    costMethod: 'fifo',
+    markPrices: { FAKE1: 40, CDNS: 290 }
+  });
+  const html = renderWorkspaceHtml({
+    storeState: state,
+    pnl,
+    markPrices: { FAKE1: 40, CDNS: 290 }
+  });
+  assert.strictEqual(isPrimaryViewWatchlist(html), true);
+  assert.ok(html.indexOf('id="inv-watch-table"') < html.indexOf('id="inv-ledger"'));
+  assert.match(html, /<details[^>]*id="inv-ledger"/);
+  assert.ok(html.includes('inv-watch-form'));
+  assert.ok(html.includes('inv-real-table'));
+  assert.ok(html.includes('CDNS'));
+  assert.ok(html.includes('buy zone') || html.includes('FAKE1'));
+  assert.ok(!html.includes('Confirmed imported transactions. P&amp;L is not mixed with TRACKING.'));
+});
+
