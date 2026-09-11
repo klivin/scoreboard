@@ -1123,6 +1123,14 @@ scoreboard.investments
 
 ## Changelog
 
+### Dynamic US equities + Chat load-then-research (CDNS)
+- `resolve_assets` is no longer catalog-only: well-formed US tickers (CDNS, …) resolve as `equity:SYM`
+- `stock-public` fetches Yahoo Finance public chart candles (daily required; hourly when Yahoo returns 1h). Stooq daily CSV is fallback
+- Incremental watermark uses `period1`/`period2` like OKX `before=`
+- Chat named-ticker order: resolve → refresh_series (Overview Load Data path) → get_chart_context → web_search → asset_card
+- Catalog stays hints/tags only. Never invent OHLC. No NFA banner
+- Status: **done** in code + tests; live Yahoo CDNS 1d last bar 2026-09-11 on this host
+
 ### Inline Chat pane (research only)
 - Chat tab: schema-versioned `scoreboard.chat` history (`schemaVersion` 2), Clear; no NFA banner
 - Server tool loop: `resolve_assets` / `refresh_series` / `get_chart_context` / `web_search` / `search_assets` then structured `content[]`
