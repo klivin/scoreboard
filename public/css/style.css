@@ -794,6 +794,12 @@ button:hover {
   background: #fffbeb;
 }
 
+.inv-edit-fill-btn {
+  margin-left: 8px;
+  font-size: 0.72rem;
+  padding: 2px 6px;
+}
+
 .inv-flag {
   display: inline-block;
   margin: 0 2px 2px 0;

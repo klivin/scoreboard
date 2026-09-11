@@ -611,7 +611,8 @@ Save as `synthetic-etrade-activity.csv`, `npm start`, Investments tab → choose
 6. **No TRACKING badge** on every watch row.
 7. **Remove on every row** (watch and imported REAL lots). No “history kept” dead-end. Confirm; default drop fills.
 8. **Bought / Sold** on the parent watch row (qty optional, price defaults to Price, date defaults today). Per-symbol fill **sub-rows** under that parent — not a resurrected global ledger as the primary screen.
-9. **Edit cost/entry** on every row.
+9. **Edit cost/entry** on every row — parent remaining basis and each fill sub-row (including imported E*TRADE lots). Typo-fix, not locked.
+10. **Entry = remaining lot cost basis** after Bought/Sold or import (not frozen start-mark). % / unrealized vs live Price use that.
 
 **Verified before the rewrite (do not re-guess):**
 1. UI was ledger-first: REAL section listed every imported transaction; watch/start-track was buried under paper BUY/SELL.
@@ -621,7 +622,7 @@ Save as `synthetic-etrade-activity.csv`, `npm start`, Investments tab → choose
 **Must ship:**
 1. Add a symbol + target. Direction defaults to long / call / buy. Start date is a date picker defaulting to today. Put/sell is available (cheap).
 2. On Refresh, load **current price** via the same incremental ingest as Overview (`POST /api/refresh?symbol=` then `GET /api/indicators` — Yahoo equities / OKX crypto). Do not invent prices. Missing stays missing.
-3. Each watch row: symbol, start date, cost/entry (if a REAL lot exists) or start mark, live mark, % gain/loss, target, in-range badge. In-zone rows are visually obvious and pinned to the top.
+3. Each watch row: symbol, start date, **Entry = remaining lot cost basis** after fills/import (start mark only when flat), live mark, % / unrealized vs that remaining basis, target, in-range badge. In-zone rows are visually obvious and pinned to the top.
    - Long, no lot: **buy zone** when mark ≤ target (open).
    - Long, has REAL lot: **sell zone** when mark ≥ target (close).
    - Short is the inverse. Optional target-to makes a range.
@@ -630,7 +631,7 @@ Save as `synthetic-etrade-activity.csv`, `npm start`, Investments tab → choose
 6. Hide/bury the transaction ledger (`<details>`). No transaction dump as the primary view.
 
 **Verification:**
-- `npm test` — 267/267. Watch % / in-zone / pin; Positions Cost Basis ≠ Last Price; primary HTML is watchlist not ledger; CDNS equity Yahoo `assetClass`; IBIT/ETHA stay ETF; BTC coin and IBIT ETF marks stay distinct; Remove on every row; Bought leftover → sell zone; Add auto-refresh
+- `npm test` — 271/271. Watch % / in-zone / pin; Positions Cost Basis ≠ Last Price; primary HTML is watchlist not ledger; CDNS equity Yahoo `assetClass`; IBIT/ETHA stay ETF; BTC coin and IBIT ETF marks stay distinct; Remove on every row; Bought leftover → sell zone; Add auto-refresh; Entry = remaining lot cost after Bought/Sold/import; parent + fill cost editable
 - Localhost UI (2026-09-11, synthetic Positions CSV only — not Kevin’s E*TRADE file): Watch / Track tab. Add CDNS target 300 start=today → Refresh: live mark **$289.37** (Yahoo ingest), % vs start, **buy zone** (mark ≤ 300). Import synthetic Positions → FAKE1 qty 6, cost **$150.00** (not $240 last-price), mark $40, unrealized **$90.00 / 60%**. FAKE3 no lot (no cost). Ledger collapsed in details. File stays in the browser.
 - Localhost (2026-09-11, this PR): Add CDNS equity target **280** auto-refreshed Price **$289.37** Yahoo as-of **2026-09-11** (no second click). IBIT ETF Price **$43.77** (not BTC-USDT). `BTC` mark key stayed empty on the ETF refresh. No private CSV.
 

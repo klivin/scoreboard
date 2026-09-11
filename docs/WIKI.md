@@ -1097,8 +1097,10 @@ After updates, users may need to clear browser cache to see changes. Hard refres
 - Display is the priced ticker + venue: `BTC · coin`, `IBIT · ETF`, `CDNS · equity`.
 - Start date is a `<input type="date">`, default today. Optional entry/start mark; if omitted, the first successful ingest close freezes start mark (or the close on/before start date). Add also **auto-refreshes** Price.
 - **Refresh prices** uses the same incremental ingest as Overview: `POST /api/refresh?symbol=&assetClass=` then `GET /api/indicators?interval=1d` (Yahoo `stock-public` for etf/equity, OKX for crypto). Last finite close is **Price**, with as-of date. Empty/failed fetch stays **missing** — never a fake price. Imported IBIT/FBTC/ETHA are not refreshed as OKX BTC/ETH.
-- Each parent row: instrument, start, cost/entry or start mark, **Price** + as-of, %, target, zone, actions (**Bought / Sold / Edit cost / Remove**). No TRACKING badge on every row. Remove works on watches and imported REAL lots (confirm; default drop fills). There is no “history kept” dead-end.
-- **Bought / Sold** record per-symbol fills as **sub-rows** under that parent (date, side, qty, fill price, $/% vs Price). Not a global ledger as the primary screen. Leftover qty is a lot → sell zone when Price ≥ target; a full sell returns to buy-zone watch.
+- Each parent row: instrument, start, **Entry**, **Price** + as-of, %, target, zone, actions (**Bought / Sold / Edit cost / Remove**). No TRACKING badge on every row. Remove works on watches and imported REAL lots (confirm; default drop fills). There is no “history kept” dead-end.
+- **Entry** is remaining lot cost basis after Bought/Sold or an E*TRADE import (FIFO remaining average vs live Price; % and unrealized use that). A frozen start mark is only used when there is no leftover lot. `entryOverride` does not lock over remaining lots.
+- **Edit cost** is a typo-fix on the parent remaining basis and on **every fill sub-row** (watch Bought/Sold and imported E*TRADE lots). Not locked — later fills recompute remaining Entry.
+- **Bought / Sold** record per-symbol fills as **sub-rows** under that parent (date, side, qty, fill price, $/% vs Price, Edit cost). Not a global ledger as the primary screen. Leftover qty is a lot → sell zone when Price ≥ target; a full sell returns to buy-zone watch.
 - **In-zone:** long with no lot → buy zone when Price ≤ target (open). Long with leftover qty (import or Bought) → sell zone when Price ≥ target (close). Short is the inverse. Missing Price or target → —. In-zone rows are highlighted and pinned to the top.
 
 **Secondary UI — REAL positions:**
@@ -1143,12 +1145,19 @@ scoreboard.investments
 
 ## Changelog
 
+### Watch / Track remaining cost basis + editable fills
+- Parent Entry is remaining lot cost (FIFO leftover average), not a frozen start-mark, after Bought/Sold or E*TRADE import
+- % and unrealized vs live Price use that remaining basis
+- Edit cost on the parent remaining basis and on every fill sub-row, including imported lots (typo-fix, not locked)
+- Add auto-refresh from the venue PR is unchanged (`POST /api/refresh?symbol=&assetClass=`)
+- Status: **doing** in code + `npm test`
+
 ### Watch / Track venue, Price, Remove, Bought/Sold
 - Instrument class `crypto` | `etf` | `equity` on every row; `BTC · coin` vs `IBIT · ETF` vs `CDNS · equity`
 - Add auto-refreshes Price (`POST /api/refresh?symbol=&assetClass=`); as-of shown next to Price
 - Imported E*TRADE tickers stay listed (IBIT/FBTC/ETHA); bare BTC/ETH needs a venue picker — no silent OKX spot
 - Remove on every row (default drop fills). Bought/Sold fills are per-symbol sub-rows, not a primary ledger
-- Status: **doing** in code + `npm test` (267)
+- Status: **doing** in code + `npm test`
 
 ### Dynamic US equities + Chat load-then-research (CDNS)
 - `resolve_assets` is no longer catalog-only: well-formed US tickers (CDNS, …) resolve as `equity:SYM`
@@ -1198,6 +1207,7 @@ scoreboard.investments
 - Venue/class `crypto` | `etf` | `equity`; ETF Yahoo ticker required; imported IBIT/ETHA stay listed tickers (never OKX BTC/ETH spot)
 - Watch add auto-refreshes Price. Target upserts on the same instrument. Remove on every row (default drop fills)
 - Bought/Sold fills are **sub-rows per symbol**. Leftover qty → sell zone; flat → buy zone
+- Entry = remaining lot cost basis (not frozen start-mark). Parent remaining basis and each fill price are editable (imported lots too)
 - In-zone: buy zone / sell zone for open vs close; in-zone rows pinned and highlighted
 - REAL positions secondary: cost, mark, unrealized $, %
 - E*TRADE Positions: Cost Basis / Average Cost → lot cost; Last Price is mark only (not basis)

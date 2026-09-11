@@ -33,7 +33,7 @@ import {
   formatInstrumentLabel,
   resolveWatchInstrument
 } from './investments/instrument.js';
-import { collectWatchTargets, fillLotState } from './investments/watch.js';
+import { collectWatchTargets, fillLotState, resolveWatchEntry, scaleBuyFillPrices } from './investments/watch.js';
 import { fetchSymbolMark } from './investments/marks.js';
 import { buildExportCsv, buildExportJson } from './investments/export.js';
 import {
@@ -1416,6 +1416,191 @@ test('Add watch auto-refreshes Yahoo/OKX marks with assetClass; ETF never fetche
   assert.strictEqual(controller.markPrices.IBIT, 32.5);
   assert.ok(urls.some((u) => u.includes('symbol=IBIT') && u.includes('assetClass=etf')));
   assert.ok(!urls.some((u) => /symbol=BTC/.test(u)));
+});
+
+test('Entry is remaining lot cost basis after Bought/Sold, not frozen start mark', () => {
+  const frozenStart = 289.37;
+  const bought = buildWatchRows({
+    tracking: [{
+      id: 'w',
+      symbol: 'CDNS',
+      assetClass: 'equity',
+      markSymbol: 'CDNS',
+      startDate: '2026-09-11',
+      baselinePrice: frozenStart,
+      startMark: frozenStart,
+      entryOverride: frozenStart,
+      targetPrice: 280,
+      direction: 'long',
+      status: 'active',
+      fills: [{ id: 'f1', side: 'BUY', date: '2026-09-11', quantity: 2, price: 270 }]
+    }],
+    markPrices: { CDNS: 290 }
+  });
+  assert.strictEqual(bought[0].entry, 270);
+  assert.strictEqual(bought[0].entryKind, 'cost');
+  assert.strictEqual(bought[0].costBasis, 540);
+  assert.ok(Math.abs(bought[0].returnPct - ((290 - 270) / 270)) < 1e-9);
+  assert.ok(Math.abs(bought[0].unrealizedPnl - ((290 - 270) * 2)) < 1e-9);
+
+  const fifoRemaining = fillLotState([
+    { id: 'a', side: 'BUY', date: '2026-09-01', quantity: 10, price: 20 },
+    { id: 'b', side: 'BUY', date: '2026-09-02', quantity: 10, price: 30 },
+    { id: 'c', side: 'SELL', date: '2026-09-03', quantity: 10, price: 40 }
+  ], { costMethod: 'fifo' });
+  assert.strictEqual(fifoRemaining.quantity, 10);
+  assert.strictEqual(fifoRemaining.costBasis, 300);
+  assert.strictEqual(fifoRemaining.averagePrice, 30);
+
+  const afterSell = buildWatchRows({
+    tracking: [{
+      id: 'w',
+      symbol: 'CDNS',
+      assetClass: 'equity',
+      markSymbol: 'CDNS',
+      startMark: frozenStart,
+      entryOverride: frozenStart,
+      targetPrice: 280,
+      direction: 'long',
+      status: 'active',
+      fills: [
+        { id: 'a', side: 'BUY', date: '2026-09-01', quantity: 10, price: 20 },
+        { id: 'b', side: 'BUY', date: '2026-09-02', quantity: 10, price: 30 },
+        { id: 'c', side: 'SELL', date: '2026-09-03', quantity: 10, price: 40 }
+      ]
+    }],
+    markPrices: { CDNS: 33 },
+    costMethod: 'fifo'
+  });
+  assert.strictEqual(afterSell[0].entry, 30);
+  assert.strictEqual(afterSell[0].costBasis, 300);
+  assert.ok(Math.abs(afterSell[0].returnPct - ((33 - 30) / 30)) < 1e-9);
+  assert.ok(Math.abs(afterSell[0].unrealizedPnl - 30) < 1e-9);
+});
+
+test('imported E*TRADE lot Entry is remaining cost, not start mark', () => {
+  const rows = buildWatchRows({
+    tracking: [{
+      id: 'imp',
+      symbol: 'FAKE1',
+      assetClass: 'equity',
+      markSymbol: 'FAKE1',
+      startDate: '2026-09-11',
+      baselinePrice: 99,
+      startMark: 99,
+      targetPrice: 40,
+      direction: 'long',
+      status: 'active',
+      fills: []
+    }],
+    events: [{
+      id: 'evt_buy',
+      activityType: 'buy',
+      symbol: 'FAKE1',
+      assetClass: 'equity',
+      markSymbol: 'FAKE1',
+      quantity: 6,
+      price: 25,
+      costBasis: 150,
+      source: 'import'
+    }],
+    markPrices: { FAKE1: 40 }
+  });
+  assert.strictEqual(rows[0].entry, 25);
+  assert.strictEqual(rows[0].costBasis, 150);
+  assert.strictEqual(rows[0].entryKind, 'cost');
+  assert.ok(Math.abs(rows[0].returnPct - 0.6) < 1e-9);
+  assert.ok(Math.abs(rows[0].unrealizedPnl - 90) < 1e-9);
+});
+
+test('parent remaining basis and each fill price are editable (imported too)', () => {
+  const store = new InvestmentsStore({ storage: new MemoryStorage() });
+  const added = store.addTracking(startTrackingInput({
+    symbol: 'CDNS',
+    assetClass: 'equity',
+    startDate: '2026-09-11',
+    baselinePrice: 289.37,
+    targetPrice: 280,
+    requireTarget: true
+  }).record);
+  store.addWatchFill(added.id, { id: 'buy1', side: 'BUY', quantity: 2, price: 270, date: '2026-09-11' });
+  store.commitImport({
+    canCommit: true,
+    rawRows: [{ lineNumber: 1, raw: {}, record: {} }],
+    events: [{
+      id: 'imp_ibit',
+      fingerprint: 'imp_ibit_fp',
+      activityType: 'buy',
+      symbol: 'IBIT',
+      assetClass: 'etf',
+      markSymbol: 'IBIT',
+      yahooTicker: 'IBIT',
+      quantity: 1,
+      price: 28,
+      costBasis: 28
+    }]
+  }, { sourceFileName: 'synthetic.csv' });
+
+  const controller = new InvestmentsController({
+    store,
+    view: { render() {}, renderEmpty() {}, renderPreview() {}, hidePreview() {} },
+    promptImpl: (message, fallback) => {
+      if (String(message).includes('Fill')) return '275';
+      if (String(message).includes('Remaining')) return '280';
+      return fallback;
+    },
+    alertImpl: () => {}
+  });
+
+  assert.strictEqual(controller.editFill('buy1'), true);
+  assert.strictEqual(store.collection('tracking').find((r) => r.id === added.id).fills[0].price, 275);
+  let row = buildWatchRows({
+    tracking: store.collection('tracking'),
+    events: store.collection('events'),
+    markPrices: { CDNS: 290 }
+  }).find((r) => r.symbol === 'CDNS');
+  assert.strictEqual(row.entry, 275);
+
+  assert.strictEqual(controller.editEntry(added.id), true);
+  row = buildWatchRows({
+    tracking: store.collection('tracking'),
+    events: store.collection('events'),
+    markPrices: { CDNS: 290 }
+  }).find((r) => r.symbol === 'CDNS');
+  assert.ok(Math.abs(row.entry - 280) < 1e-9);
+  assert.strictEqual(store.collection('tracking').find((r) => r.id === added.id).entryOverride, null);
+
+  assert.strictEqual(controller.editFill('imp_ibit'), true);
+  const imported = store.collection('events').find((e) => e.id === 'imp_ibit');
+  assert.strictEqual(imported.price, 275);
+  assert.strictEqual(imported.costBasis, 275);
+
+  const html = renderWorkspaceHtml({
+    storeState: store.getState(),
+    pnl: computeLotsAndPnl(store.allFillEvents(), { costMethod: 'fifo', markPrices: { CDNS: 290, IBIT: 32 } }),
+    markPrices: { CDNS: 290, IBIT: 32 }
+  });
+  assert.ok(html.includes('inv-edit-fill-btn'));
+  assert.ok(html.includes('data-fill-id="buy1"'));
+  assert.ok(html.includes('data-fill-id="imp_ibit"'));
+  assert.ok(html.includes('remaining'));
+});
+
+test('scaleBuyFillPrices retargets remaining average without locking later fills', () => {
+  const fills = [
+    { id: 'a', side: 'BUY', date: '2026-09-01', quantity: 2, price: 100 },
+    { id: 'b', side: 'BUY', date: '2026-09-02', quantity: 2, price: 200 }
+  ];
+  const scaled = scaleBuyFillPrices(fills, 160, { costMethod: 'fifo' });
+  assert.strictEqual(scaled.ok, true);
+  const lot = fillLotState(scaled.fills, { costMethod: 'fifo' });
+  assert.ok(Math.abs(lot.averagePrice - 160) < 1e-9);
+  const locked = resolveWatchEntry({
+    record: { entryOverride: 50, startMark: 50 },
+    lot
+  });
+  assert.strictEqual(locked.entryKind, 'cost');
+  assert.ok(Math.abs(locked.entry - 160) < 1e-9);
 });
 
 test('fetchSymbolMark skips unresolved BTC ETF (no silent $77k coin)', async () => {

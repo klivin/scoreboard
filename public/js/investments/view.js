@@ -120,14 +120,17 @@ function fillSubRows(row) {
   if (!fills.length) {
     return `${editor}`;
   }
-  const body = fills.map((fill) => `<tr class="inv-fill-sub" data-parent-id="${escapeHtml(row.id)}">
+  const body = fills.map((fill) => `<tr class="inv-fill-sub" data-parent-id="${escapeHtml(row.id)}" data-fill-id="${escapeHtml(fill.id || '')}">
     <td class="inv-fill-indent">${escapeHtml(fill.date || 'missing')}</td>
     <td>${escapeHtml(fill.side)}</td>
     <td>${fill.quantity == null ? 'missing' : escapeHtml(fill.quantity)}</td>
     <td>${money(fill.price)}</td>
     <td class="${signedClass(fill.vsDollar)}">${money(fill.vsDollar)}</td>
     <td class="${signedClass(fill.vsPct)}">${pct(fill.vsPct)}</td>
-    <td colspan="2"><span class="inv-muted">${escapeHtml(fill.source || 'watch')}</span></td>
+    <td colspan="2">
+      <span class="inv-muted">${escapeHtml(fill.source || 'watch')}</span>
+      ${fill.id ? `<button type="button" class="inv-edit-fill-btn" data-fill-id="${escapeHtml(fill.id)}" data-track-id="${escapeHtml(row.id)}">Edit cost</button>` : ''}
+    </td>
   </tr>`).join('');
   return `${editor}
     <tr class="inv-fill-head" data-parent-id="${escapeHtml(row.id)}">
@@ -153,18 +156,35 @@ function watchRowActions(row) {
   </div>`;
 }
 
+function entryCell(row) {
+  if (row.entry == null) return '<span class="inv-muted">missing</span>';
+  if (row.entryKind === 'cost') {
+    const basis = row.costBasis != null
+      ? `<div class="inv-muted">remaining · ${money(row.costBasis)}</div>`
+      : '<div class="inv-muted">remaining</div>';
+    return `<div>${money(row.entry)}</div>${basis}`;
+  }
+  return `<div>${money(row.entry)}</div><div class="inv-muted">start mark</div>`;
+}
+
+function pctCell(row) {
+  const unrealized = row.hasRealLot && row.unrealizedPnl != null
+    ? `<div class="inv-muted">${money(row.unrealizedPnl)}</div>`
+    : '';
+  return `<div class="${signedClass(row.returnPct)}">${pct(row.returnPct)}</div>${unrealized}`;
+}
+
 function watchRowHtml(row) {
   const pin = row.inZone ? 'inv-row-inzone' : '';
-  const entryLabel = row.entryKind === 'cost' ? 'cost' : 'start mark';
   return `<tr class="${pin}" data-watch-id="${escapeHtml(row.id || '')}" data-in-zone="${row.inZone ? '1' : '0'}" data-asset-class="${escapeHtml(row.assetClass || '')}">
     <td>
       <div class="inv-instrument">${escapeHtml(row.label)}</div>
       ${venuePicker(row)}
     </td>
     <td>${escapeHtml(row.startDate || 'missing')}</td>
-    <td>${row.entry == null ? 'missing' : `${money(row.entry)} <span class="inv-muted">(${escapeHtml(entryLabel)})</span>`}</td>
+    <td>${entryCell(row)}</td>
     <td>${priceCell(row)}</td>
-    <td class="${signedClass(row.returnPct)}">${pct(row.returnPct)}</td>
+    <td>${pctCell(row)}</td>
     <td>${targetCell(row)}</td>
     <td>${zoneCell(row)}</td>
     <td>${watchRowActions(row)}</td>
@@ -206,7 +226,8 @@ export function renderWorkspaceHtml(model = {}, now = new Date()) {
     realPositions,
     markPrices,
     markMeta,
-    events
+    events,
+    costMethod: settings.costMethod || 'fifo'
   });
   const zoneBySymbol = {};
   for (const row of watchRows) {
@@ -265,7 +286,7 @@ export function renderWorkspaceHtml(model = {}, now = new Date()) {
               <tr>
                 <th>Symbol</th>
                 <th>Start</th>
-                <th>Entry / start mark</th>
+                <th>Entry</th>
                 <th>Price</th>
                 <th>%</th>
                 <th>Target</th>
