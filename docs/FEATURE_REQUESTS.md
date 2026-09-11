@@ -638,6 +638,36 @@ Save as `synthetic-etrade-activity.csv`, `npm start`, Investments tab → choose
 
 ---
 
+## Chat
+
+### Inline Chat pane (Bullmania-style, research only)
+**Status:** doing  
+**Request:** Persistent in-app Chat tab/pane so Kevin can ask about any investment (example: “what are 5 crypto coins that are doing buybacks”) and tap a resolved asset onto the Overview chart. Research / paper only — **NFA**. No keys, no live trades, no custody. Not Pooli.
+
+**Must ship:**
+1. Chat tab (vanilla HTML/CSS/JS MVC). History in schema-versioned `scoreboard.chat` localStorage. Clear + **NFA banner always visible**.
+2. Defined **tool loop** (not UI regex ticker parsing): `resolve_assets`, optional `search_assets`, optional `get_chart_context`. Final assistant turn is structured `content[]` (`text` + `asset_card`). **No card without a successful `resolve_assets` row.** Unknowns: text-only “couldn’t resolve TICKER”.
+3. Every resolved stock/crypto is a tappable chip/card. Tap calls `AppController.loadAsset({ symbol, assetClass, intervalHint })` — same Overview symbol + **Load Data** path (`reloadSelected`). Free-text ticker work (PR #14 / `bc-cde1c994`) is **not** on main yet; this seam is thin so that PR can fill `#ticker-input` later. Do **not** duplicate OKX watermark ingest (PR #13).
+4. “load SKR”, “compare MSTR vs BTC” go through tools, not a client regex.
+5. Model wiring: if `OPENAI_API_KEY` or `XAI_API_KEY` / `GROK_API_KEY` is set **server-side**, use that function-calling endpoint. **Never** put keys in the repo or client JS. If no key: full UI + tool loop + card renderer + deterministic **local stub** that exercises resolve → cards → tap-to-load.
+
+**Honesty:**
+- Cards only for catalog-resolved assets. No fake chips.
+- `get_chart_context` never invents OHLCV — cached series or “missing”.
+- Buyback / research lists are a labeled static catalog, not a live on-chain feed.
+- House cloud agents stay grok-4.6. In-app chat uses whatever tool-calling key is already on the server, else the stub.
+
+**Verification:**
+- `npm test` — 172/172: resolve success → cards; unknown → no card; search → resolve → cards; tap/load payload; history schema migration; NFA banner present
+- Localhost UI (2026-09-11, this host — no Flow pack, **stub** provider, no LLM key): Chat tab NFA banner + Clear + demo-provider note. “5 buyback coins” → BNB/MKR/OKB/LEO/KCS cards. Tap BNB → Overview symbol BNB + Load Data path (`No data available for BNB 1d` is honest — pack missing). History persisted across tabs. “load SKR” and “compare MSTR vs BTC” cards. `load ZZQXNOTATICKER` → text-only couldn’t resolve, no card. Clear empties transcript; banner stays.
+- No secrets in git
+
+**Design:** `docs/WIKI.md` (Inline Chat pane)
+
+**Priority:** High
+
+---
+
 ## Future Enhancements
 
 ### Supertrend/ATR regime filter (signal strategy e)

@@ -1,6 +1,7 @@
 import { optionKeyFromToggleId, TOGGLE_OPTION_MAP } from './toggles.js';
 import { buildTransactionMarkers } from './investments/markers.js';
 import { getEnabledSignalStrategies, getSignalHorizon } from './signal-panel.js';
+import { loadAssetOnApp } from './load-asset.js';
 
 export class AppController {
   constructor(views) {
@@ -341,6 +342,14 @@ export class AppController {
     return forecast;
   }
 
+  /**
+   * Chat / ticker seam. Sets Overview symbol + interval, then the same
+   * Load Data path (`reloadSelected`). PR #14 can replace setSelectedSymbol.
+   */
+  async loadAsset(payload) {
+    return loadAssetOnApp(this, payload, typeof document !== 'undefined' ? document : null);
+  }
+
   async reloadSelected() {
     const symbol = this.getSelectedSymbol();
     const interval = this.getSelectedInterval();
@@ -458,6 +467,9 @@ export class AppController {
           await this.updateUniverse();
         } else if (tab === 'investments' && this.investments) {
           this.investments.refresh();
+        } else if (tab === 'chat' && this.chat) {
+          this.clearPageError();
+          this.chat.refresh();
         }
       });
     });

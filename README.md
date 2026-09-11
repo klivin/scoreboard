@@ -14,11 +14,7 @@ Crypto market analysis and forecasting dashboard built with vanilla JavaScript M
   - Moving Averages (MA20 EMA, MA50/100/200 SMA)
   - Ichimoku Cloud (Tenkan, Kijun, Senkou A/B, Chikou)
   - Volume overlays
-- **Forecasting Engine**: 
-  - Naive baseline predictions
-  - Trend-based forecasting with confidence bands
-  - Multi-horizon forecasts (1d, 7d, 30d)
-  - Steelman analysis (bull/bear cases)
+- **Research Chat**: Tool-loop pane (resolve/search/chart-context). Tappable asset cards load Overview. NFA. Server-side LLM key optional; otherwise a local stub.
 - **Data Management**: 
   - Local JSON store (Firestore-compatible schema)
   - CSV/JSON data ingestion
@@ -97,6 +93,10 @@ npm start
 ```
 
 The application will be available at `http://localhost:3000`
+
+### Optional in-app Chat LLM (server-side only)
+
+Do **not** paste keys into the repo or client JS. If the process has `OPENAI_API_KEY` or `XAI_API_KEY` / `GROK_API_KEY`, `POST /api/chat` uses that OpenAI-compatible function-calling API. Without a key, Chat still works via a deterministic local stub (same tools and cards). See `docs/WIKI.md` (Inline Chat pane).
 
 ### Development Mode (with auto-reload)
 

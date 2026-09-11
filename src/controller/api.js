@@ -14,6 +14,7 @@ import { runFullBacktest, loadBacktestSeries, formatBacktestReport } from '../mo
 import { loadScannerPayload } from '../model/scanner-build.js';
 import { evaluateTrackingFromBaseline, finiteOrNull } from '../model/scanner.js';
 import { scannerFlipsStore } from '../model/store-adapter.js';
+import { runChatTurn, chatStatus, createChatProvider, createToolRunner } from '../model/chat/index.js';
 
 export function handleGetSeries(req, res) {
   const { symbol = 'BTC', interval = '1d', from, to, fields, since, sinceCursor } = req.query;
@@ -350,6 +351,24 @@ export function handleGetRefreshStatus(req, res) {
   try {
     const runtime = getRefreshRuntime();
     res.json(runtime.getStatus());
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+}
+
+export function handleGetChatStatus(req, res) {
+  res.json(chatStatus());
+}
+
+export async function handlePostChat(req, res) {
+  try {
+    const messages = req.body && Array.isArray(req.body.messages) ? req.body.messages : [];
+    const result = await runChatTurn({
+      messages,
+      provider: createChatProvider(),
+      tools: createToolRunner()
+    });
+    res.json(result);
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
