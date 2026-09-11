@@ -9,6 +9,10 @@ export const CHAT_MODEL_OPTIONS = {
     { id: 'grok-4', label: 'Grok 4' }
   ],
   openai: [
+    { id: 'gpt-5.6-sol', label: 'GPT-5.6 Sol' },
+    { id: 'gpt-5.6', label: 'GPT-5.6 (alias → Sol)' },
+    { id: 'gpt-5.6-terra', label: 'GPT-5.6 Terra' },
+    { id: 'gpt-5.6-luna', label: 'GPT-5.6 Luna' },
     { id: 'gpt-4o-mini', label: 'gpt-4o-mini' },
     { id: 'gpt-4o', label: 'gpt-4o' },
     { id: 'gpt-4.1-mini', label: 'gpt-4.1-mini' }
