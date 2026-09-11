@@ -474,7 +474,7 @@ test('OKX adapter falls back to spot when swap instrument is missing', async () 
   assert.strictEqual(result.instId, 'INST-USDT');
 });
 
-test('adaptersForTicker builds OKX 1h+1d for SOL and stock stubs for AAPL', () => {
+test('adaptersForTicker builds OKX 1h+1d for SOL and stock-public for AAPL/CDNS', () => {
   const sol = adaptersForTicker('sol');
   assert.deepStrictEqual(
     sol.filter((a) => a.id === 'okx-candles').map((a) => a.interval).sort(),
@@ -484,4 +484,7 @@ test('adaptersForTicker builds OKX 1h+1d for SOL and stock stubs for AAPL', () =
   const aapl = adaptersForTicker('AAPL');
   assert.ok(aapl.every((a) => a.id === 'stock-public'));
   assert.deepStrictEqual(aapl.map((a) => a.interval).sort(), ['1d', '1h']);
+  const cdns = adaptersForTicker('CDNS');
+  assert.ok(cdns.every((a) => a.id === 'stock-public' && a.symbol === 'CDNS' && a.mode === 'incremental'));
+  assert.deepStrictEqual(cdns.map((a) => a.interval).sort(), ['1d', '1h']);
 });

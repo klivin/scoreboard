@@ -31,7 +31,8 @@ test('applySeriesStoreToPack does not let BTC ingest erase ETH at the same bar',
   applySeriesStoreToPack(pack, [
     { source: 'okx-candles', symbol: 'ETH', interval: '1d', timestamp: ts, close: 2566 },
     { source: 'okx-candles', symbol: 'BTC', interval: '1d', timestamp: ts, close: 77820 },
-    { source: 'okx-candles', symbol: 'SOL', interval: '1d', timestamp: ts, close: 102 }
+    { source: 'okx-candles', symbol: 'SOL', interval: '1d', timestamp: ts, close: 102 },
+    { source: 'stock-public', symbol: 'CDNS', interval: '1d', timestamp: ts, close: 289.37 }
   ]);
   const packCloses = Object.fromEntries(
     (pack.candles_1d.data || []).map((row) => [row.symbol || 'BTC', row.close])
@@ -45,4 +46,5 @@ test('applySeriesStoreToPack does not let BTC ingest erase ETH at the same bar',
   assert.strictEqual(liveCloses.ETH, 2566);
   assert.strictEqual(liveCloses.BTC, 77820);
   assert.strictEqual(liveCloses.SOL, 102);
+  assert.strictEqual(liveCloses.CDNS, 289.37);
 });

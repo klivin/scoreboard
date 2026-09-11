@@ -1,11 +1,12 @@
 import { test } from 'node:test';
 import assert from 'node:assert';
 import { defaultCatalog, findCatalogMentions, lookupAsset } from './catalog.js';
-import { resolveAssets, searchAssets, getChartContext, createToolRunner } from './tools.js';
+import { resolveAssets, searchAssets, getChartContext, createToolRunner, TOOL_DEFINITIONS } from './tools.js';
 import { sanitizeAssistantContent, cardsFromResolved } from './blocks.js';
 import { createStubProvider, stubIntent } from './stub.js';
 import { runChatTurn, chatStatus } from './loop.js';
 import { createChatProvider } from './provider.js';
+import { extractTickerQueries } from '../ticker.js';
 import {
   detectChatProvider,
   sanitizeChatOverride,
@@ -21,6 +22,24 @@ import { SYSTEM_PROMPT } from './prompt.js';
 
 const catalog = defaultCatalog();
 
+function offlineTools(extra = {}) {
+  return createToolRunner({
+    catalog,
+    refreshSeries: async ({ symbol }) => ({
+      ok: false,
+      symbol,
+      ran: [],
+      note: 'offline test refresh — no network'
+    }),
+    webSearch: async (query) => ({
+      query,
+      results: [],
+      note: 'offline test search — no network'
+    }),
+    ...extra
+  });
+}
+
 test('resolve_assets: known query succeeds with load payload', () => {
   const [row] = resolveAssets(['bitcoin'], catalog);
   assert.strictEqual(row.ok, true);
@@ -35,6 +54,23 @@ test('resolve_assets: unknown is rejected', () => {
   assert.strictEqual(row.ok, false);
   assert.strictEqual(row.load, null);
   assert.strictEqual(row.symbol, null);
+});
+
+test('resolve_assets: CDNS-like equity resolves without catalog allowlist', () => {
+  assert.strictEqual(lookupAsset('CDNS', catalog), null);
+  const [row] = resolveAssets(['CDNS'], catalog);
+  assert.strictEqual(row.ok, true);
+  assert.strictEqual(row.symbol, 'CDNS');
+  assert.strictEqual(row.assetClass, 'equity');
+  assert.strictEqual(row.scoreboardId, 'equity:CDNS');
+  assert.strictEqual(row.catalogHint, false);
+  assert.deepStrictEqual(row.load, { symbol: 'CDNS', assetClass: 'equity', intervalHint: '1d' });
+  assert.ok(!catalog.some((asset) => asset.symbol === 'CDNS'), 'CDNS must not be a hardcoded catalog row');
+});
+
+test('extractTickerQueries finds CDNS in an entry question', () => {
+  assert.deepStrictEqual(extractTickerQueries('good entry for CDNS / thinking of buying more'), ['CDNS']);
+  assert.deepStrictEqual(stubIntent('good entry for CDNS (Cadence)', catalog).queries, ['CDNS']);
 });
 
 test('resolve_assets: SKR and MSTR are cataloged', () => {
@@ -82,18 +118,18 @@ test('sanitize strips hallucinated cards without resolve', () => {
 });
 
 test('cardsFromResolved only emits successful rows', () => {
-  const content = cardsFromResolved(resolveAssets(['BTC', 'NOPE'], catalog));
+  const content = cardsFromResolved(resolveAssets(['BTC', 'ZZQXNOTATICKER'], catalog));
   const cards = content.filter((block) => block.type === 'asset_card');
   assert.strictEqual(cards.length, 1);
   assert.strictEqual(cards[0].symbol, 'BTC');
-  assert.match(content[0].markdown, /couldn['’]t resolve NOPE/i);
+  assert.match(content[0].markdown, /couldn['’]t resolve ZZQXNOTATICKER/i);
 });
 
 test('tool loop: resolve success → cards', async () => {
   const result = await runChatTurn({
     messages: [{ role: 'user', content: 'load SKR' }],
     provider: createStubProvider({ catalog }),
-    tools: createToolRunner({ catalog })
+    tools: offlineTools()
   });
   const cards = result.content.filter((block) => block.type === 'asset_card');
   assert.strictEqual(cards.length, 1);
@@ -106,17 +142,80 @@ test('tool loop: unknown → no card', async () => {
   const result = await runChatTurn({
     messages: [{ role: 'user', content: 'load ZZQXNOTATICKER' }],
     provider: createStubProvider({ catalog }),
-    tools: createToolRunner({ catalog })
+    tools: offlineTools()
   });
   assert.strictEqual(result.content.some((block) => block.type === 'asset_card'), false);
   assert.match(result.content.map((block) => block.markdown || '').join(' '), /couldn['’]t resolve/i);
+});
+
+test('named-ticker tool order: resolve → refresh → chart → web_search → card', async () => {
+  const chartSeries = [{
+    timestamp: Date.parse('2026-09-11T13:30:00Z'),
+    date_utc: '2026-09-11',
+    close: 289.37
+  }];
+  const result = await runChatTurn({
+    messages: [{ role: 'user', content: 'good entry for CDNS / thinking of buying more' }],
+    provider: createStubProvider({ catalog }),
+    tools: createToolRunner({
+      catalog,
+      getSeries: (symbol) => (symbol === 'CDNS' ? chartSeries : []),
+      refreshSeries: async ({ symbol }) => ({
+        ok: true,
+        symbol,
+        ran: [{ id: 'stock-public', symbol, interval: '1d', status: 'ok', rowCount: 5 }]
+      }),
+      webSearch: async (query) => ({
+        query,
+        results: [{
+          title: 'Why Cadence Design Systems (CDNS) Dipped More Than Broader Market Today',
+          url: 'https://example.test/cdns-news',
+          snippet: 'Recorded-style headline fixture for tool-order tests. Not a live feed.',
+          source: 'yahoo-news'
+        }],
+        note: 'test search'
+      })
+    })
+  });
+  const names = result.toolTrace.map((row) => row.name);
+  assert.deepStrictEqual(names, [
+    'resolve_assets',
+    'refresh_series',
+    'get_chart_context',
+    'web_search'
+  ]);
+  const cards = result.content.filter((block) => block.type === 'asset_card');
+  assert.strictEqual(cards.length, 1);
+  assert.strictEqual(cards[0].symbol, 'CDNS');
+  assert.strictEqual(cards[0].scoreboardId, 'equity:CDNS');
+  const text = result.content.map((block) => block.markdown || '').join(' ');
+  assert.doesNotMatch(text, /couldn['’]t resolve/i);
+  assert.match(text, /289\.37|2026-09-11/);
+  assert.match(text, /Dipped More Than Broader Market|Recent:/i);
+});
+
+test('TOOL_DEFINITIONS include refresh_series and web_search', () => {
+  const names = TOOL_DEFINITIONS.map((def) => def.function.name);
+  assert.ok(names.includes('resolve_assets'));
+  assert.ok(names.includes('refresh_series'));
+  assert.ok(names.includes('get_chart_context'));
+  assert.ok(names.includes('web_search'));
+});
+
+test('prompt requires load-then-research and forbids catalog-only resolve language', () => {
+  assert.match(SYSTEM_PROMPT, /refresh_series/);
+  assert.match(SYSTEM_PROMPT, /web_search/);
+  assert.match(SYSTEM_PROMPT, /catalog is hints/i);
+  assert.match(SYSTEM_PROMPT, /Never reply that you could not resolve a real listed ticker/i);
+  assert.doesNotMatch(SYSTEM_PROMPT, /Reject unknowns/);
+  assert.doesNotMatch(SYSTEM_PROMPT, /not financial advice/i);
 });
 
 test('tool loop: search_assets → resolve → cards', async () => {
   const result = await runChatTurn({
     messages: [{ role: 'user', content: 'what are 5 crypto coins that are doing buybacks' }],
     provider: createStubProvider({ catalog }),
-    tools: createToolRunner({ catalog })
+    tools: offlineTools()
   });
   const names = result.toolTrace.map((row) => row.name);
   assert.ok(names.includes('search_assets'));
@@ -130,7 +229,7 @@ test('tool loop: compare MSTR vs BTC via tools', async () => {
   const result = await runChatTurn({
     messages: [{ role: 'user', content: 'compare MSTR vs BTC' }],
     provider: createStubProvider({ catalog }),
-    tools: createToolRunner({ catalog })
+    tools: offlineTools()
   });
   const cards = result.content.filter((block) => block.type === 'asset_card');
   assert.deepStrictEqual(cards.map((card) => card.symbol).sort(), ['BTC', 'MSTR']);
@@ -443,7 +542,7 @@ test('stub and live replies do not append NFA disclaimer spam', async () => {
   const result = await runChatTurn({
     messages: [{ role: 'user', content: 'load SKR' }],
     provider: createStubProvider({ catalog }),
-    tools: createToolRunner({ catalog })
+    tools: offlineTools()
   });
   const text = result.content.map((block) => block.markdown || '').join(' ');
   assert.doesNotMatch(text, /not financial advice/i);

@@ -21,7 +21,7 @@ export async function runChatTurn({
   messages = [],
   provider,
   tools,
-  maxSteps = 6
+  maxSteps = 8
 } = {}) {
   const runner = tools || createToolRunner();
   const convo = incomingToLoopMessages(messages);

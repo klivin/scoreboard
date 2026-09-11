@@ -26,7 +26,7 @@ Scoreboard is a crypto market analysis and forecasting dashboard built with vani
 - `signals/` - Extensible signal engine (EMA, MACD, RSI recovery, Ichimoku) + consensus
 - `backtest.js` - Walk-forward backtest vs buy-and-hold and naive baseline
 - `ingest.js` - Pack-file parsers (CSV/JSON on disk). No network.
-- `okx-adapter.js` / `fallback-adapters.js` / `stock-adapter.js` / `ticker.js` / `refresh.js` - Incremental ingest (OKX any crypto ticker; stocks unconfigured; ETF/CG fallback)
+- `okx-adapter.js` / `fallback-adapters.js` / `stock-adapter.js` / `ticker.js` / `refresh.js` - Incremental ingest (OKX any crypto ticker; Yahoo Finance public equity candles; ETF/CG fallback)
 - `store.js` - Local JSON storage (forecasts, errors, universe, ingest_watermarks, ingest_series)
 - `store-adapter.js` - Abstraction layer for local/Firestore backends
 
@@ -117,7 +117,7 @@ No API keys in client JS. OKX public endpoints need none. Keyed sources are out 
 | OKX BTC-USDT-SWAP OI | `okx-oi` (`1h`, `1d`) | **incremental** | Live `GET https://www.okx.com/api/v5/rubik/stat/contracts/open-interest-history?instId=BTC-USDT-SWAP&period=1H\|1D` with `begin=` when a cursor exists. `/api/v5/public/open-interest-history` is **404** (verified). Public, no key. ETH swap OI uses the same path when ETH is loaded. |
 | ETF net flows (Farside) | `etf-farside` (BTC, ETH) | **bounded-overlap fallback** | `fetchSince` **ignores** the cursor. Re-fetches/re-parses the whole small HTML table (or the pack CSV if Cloudflare/HTML fails), then dedupes by date. `nextCursor` is always `null`. Not claimed as incremental. |
 | CoinGecko top100 | `coingecko-top100` | **bounded-overlap fallback** | `fetchSince` **ignores** the cursor. Re-fetches the whole top100 markets page. On **429**, re-parses `cg_top100_universe.json`. Categories stay blank when missing. `nextCursor` is always `null`. Not claimed as incremental. |
-| Stocks | `stock-public` (`1h`, `1d`) | **unconfigured** | Interface only. No no-key public equity candle source is wired in this repo. `fetchSince` returns **zero rows** and `needsAdapter: true`. Never invents prices. |
+| Stocks | `stock-public` (`1h`, `1d`) | **incremental** | Yahoo Finance public chart API `GET https://query1.finance.yahoo.com/v8/finance/chart/{SYM}?interval=1d\|1h` (query2 host fallback). First load uses `range=5y` (1d) or `range=3mo` (1h). Second refresh sends `period1`/`period2` from the watermark overlap. Daily is required; hourly when Yahoo returns 1h bars. Stooq `https://stooq.com/q/d/l/?s={sym}.us&i=d` is a daily fallback (often JS-challenge blocked from datacenter IPs). Empty + note if both fail. **Never invents prices.** |
 
 Do not invent series. Multi-exchange OI is still absent. ETH 1h/1d live candles come from OKX ingest after Load Data (ETH is in `defaultAdapters`), not from interpolating the pack. Alt 1h that OKX lists (SOL, etc.) can be ingested after Add / Load; alts that OKX does not list stay missing (not interpolated, not zero-filled).
 
@@ -148,7 +148,7 @@ Chat tap-to-load (`AppController.loadAsset` / `public/js/load-asset.js`) writes 
 ```
 type/add ticker
   → normalizeTicker (uppercase, strip $, BTCUSDT / BTC-USDT-SWAP → BTC)
-  → classify: known crypto | known stock | unknown (try OKX)
+  → classify: known crypto | well-formed US ticker (equity) | pair-suffix crypto | unknown (try OKX)
   → POST /api/refresh?symbol=SYM   // creates adapters if needed; 1h + 1d
   → upsert ingest_series + ingest_watermarks (source, symbol, interval)
   → GET /api/indicators?symbol=SYM&interval=
@@ -162,10 +162,10 @@ type/add ticker
 | `eth` / `ETH` | ETH | crypto | `ETH-USDT-SWAP`, then `ETH-USDT` |
 | `SOL-USDT` | SOL | crypto | spot first (hint), then swap already recorded |
 | `BTCUSDT` | BTC | crypto | `BTC-USDT-SWAP`, `BTC-USDT` |
-| `AAPL` / `AAPL.US` | AAPL | stock | none — stock adapter |
+| `AAPL` / `AAPL.US` / `CDNS` | AAPL / CDNS | stock | none — Yahoo equity adapter |
 | empty / junk | `''` | — | error, no fetch |
 
-Unknown tickers (not in the small known-stock list) **attempt OKX**. If the instrument does not exist, refresh errors and the chart says missing — we do not invent a series.
+Well-formed US tickers (1–5 letters, not a crypto hint) **use the equity ingest path** even if they are not in the research catalog. Catalog names are hints/tags only. Crypto pair suffixes still attempt OKX. If Yahoo/Stooq return no bars, the chart says missing — we do not invent a series.
 
 **Cache / increment**
 
@@ -183,9 +183,9 @@ Unknown tickers (not in the small known-stock list) **attempt OKX**. If the inst
 - Hourly: `getLiveCandles` (BTC pack overlay + `live_candles` / ingest). Daily is never interpolated into 1h.
 - Non-BTC ingest lives on `pack.live_candles`; BTC pack candle CSVs stay BTC-only.
 
-**Stocks — documented gap**
+**Stocks — Yahoo Finance public candles**
 
-There is **no** in-repo no-key stock candle API (no Alpha Vantage / Polygon / Finnhub keys; Yahoo/Stooq are not wired and are not treated as a blessed public source). `src/model/stock-adapter.js` implements the same `{ id, symbol, interval, mode, fetchSince }` shape and returns `{ rows: [], needsAdapter: true, note }`. The UI shows that stocks need a configured adapter. **Do not invent equity OHLC. Do not commit a fake AAPL series.**
+`src/model/stock-adapter.js` (`stock-public`) fetches keyless Yahoo Finance chart bars and caches them in `ingest_series` with a per `(source, symbol, interval)` watermark, same overlap as OKX. Daily is required; hourly when the Yahoo 1h series exists. Stooq daily CSV is a fallback. **Do not invent equity OHLC. Do not commit a fake live CDNS series** — tests use a file labeled `RECORDED_FIXTURE_NOT_LIVE` or a live fetch.
 
 **UI**
 
@@ -559,15 +559,17 @@ The UI must not scrape free text for tickers. Interactive chips are valid only w
 
 ### System prompt (tight)
 
-Personal hobby dashboard. Never custody / keys / orders. Only emit chart links/cards for assets the tools resolved. If a symbol cannot be resolved, say so — no fake chips. Call tools first, then write cards. Do not append NFA / legal disclaimer banners.
+Personal hobby dashboard. Never custody / keys / orders. Only emit chart links/cards for assets the tools resolved. Named-ticker questions: resolve → refresh series (Overview path) → chart context → web/news → then cards. Do not say a real listed ticker “couldn’t resolve” until load+search failed. Catalog is hints/tags only. Do not append NFA / legal disclaimer banners.
 
 ### Tools
 
 | Tool | Args | Result |
 |---|---|---|
-| `resolve_assets` | `{ queries: string[] }` | Per query: `{ ok, query, symbol, name, assetClass: crypto\|equity\|etf\|other, venue, scoreboardId, load: { symbol, assetClass, intervalHint: '1d'\|'1h' } }`. Unknowns: `ok: false`. |
+| `resolve_assets` | `{ queries: string[] }` | Per query: `{ ok, query, symbol, name, assetClass: crypto\|equity\|etf\|other, venue, scoreboardId, load: { symbol, assetClass, intervalHint: '1d'\|'1h' } }`. Catalog hit or well-formed US ticker / known crypto. Junk: `ok: false`. |
+| `refresh_series` | `{ symbol, scoreboardId?, interval? }` | Same `POST /api/refresh?symbol=` path as Overview Load Data. Then cached series can be read. |
 | `search_assets` | `{ naturalQuery }` | Ranked catalog hits (e.g. “coins doing buybacks”). Then the model **must** `resolve_assets` on the hits. Static research tags, not a live chain feed. |
 | `get_chart_context` | `{ scoreboardId }` | Last cached bar metadata if `ingest_series` / pack series exists. **Never invent OHLCV.** Missing → `{ ok: false }`. |
+| `web_search` | `{ query }` | Keyless Yahoo Finance search (quotes + news) + DuckDuckGo HTML + Wikipedia opensearch. Snippets only — not invented prices. |
 
 ### Final assistant turn
 
@@ -876,14 +878,14 @@ All endpoints support symbol parameter for multi-asset queries. Returns JSON by 
 - **1h pack file that exists:** BTC only, from `okx_btc_usdt_swap_candles_1h.csv` (~1700 bars, columns `ts_ms`, `datetime_utc`, ohlcv) plus optional joined OI.
 - **1h live ingest (default adapters):** BTC and ETH from public OKX `history-candles` (`BTC-USDT-SWAP` / `ETH-USDT-SWAP`) after Load Data.
 - **1h via typed ticker:** any ticker OKX lists as `{SYM}-USDT-SWAP` or `{SYM}-USDT` (SOL, …) after Add / Load. Cached in `ingest_series` with a per-symbol watermark.
-- **1h that still does not exist:** symbols OKX does not list; all stocks (no equity adapter). Overlay / repo CSVs for alts are `indicators_daily.csv` (daily). There is no ETH 1h pack file — ETH 1h is live ingest only.
+- **1h that still does not exist:** symbols OKX does not list; equities when Yahoo 1h is empty. Overlay / repo CSVs for alts are `indicators_daily.csv` (daily). There is no ETH 1h pack file — ETH 1h is live ingest only.
 - **Required behavior:** BTC 1h charts from the OKX 1h file plus ingest overlay. ETH 1h charts from live ingest after Load Data; if ingest is empty, on-page missing message. Other 1h comes from ingest only. Do not interpolate daily into 1h. Do not plot zeros.
 - **Impact:** 1h interval selector has pack rows for BTC; other symbols need a successful OKX refresh.
 
-### Stocks have no public no-key adapter
-- **Issue:** Equities are not in the Flow pack. No in-repo stock API can be called without keys.
-- **Behavior:** `stock-public` adapter returns zero rows and `needsAdapter`. UI says missing. Prices are never invented.
-- **Impact:** Typing `AAPL` attempts load and fails honestly until a keyed/configured adapter is added (out of scope; no keys).
+### Equity candles are public Yahoo (not the Flow pack)
+- **Source:** Yahoo Finance public chart API (`query1` / `query2` `/v8/finance/chart/{SYM}`). Stooq daily CSV fallback (often blocked).
+- **Behavior:** `stock-public` incremental ingest for any well-formed US ticker (`CDNS`, `AAPL`, …). Missing/failed public fetch stays empty. Prices are never invented.
+- **Impact:** Overview Load Data and Chat tap can chart CDNS when Yahoo returns bars. Last daily bar should be near today after a successful refresh.
 
 ### Historical Depth
 - **Pack scope:** Dataset time range determined by Flow pack
@@ -907,7 +909,7 @@ npm test
 - Forecast generation
 - Forecast maturity (`too-early` / `matured` / `missing-actual`) and MAE vs naive (never fake 0)
 - Forecasts tab REAL/TRACKING filter + click payload
-- Chat tool loop (resolve → cards; unknown → no card; search → resolve)
+- Chat tool loop (resolve → refresh → chart → web_search → cards; junk → no card; search → resolve)
 - Chat tap/load payload + `scoreboard.chat` schema migration (no NFA banner)
 - Signal strategies (synthetic crosses, RSI recovery, lookahead)
 - Consensus aggregation
@@ -1123,7 +1125,7 @@ scoreboard.investments
 
 ### Inline Chat pane (research only)
 - Chat tab: schema-versioned `scoreboard.chat` history (`schemaVersion` 2), Clear; no NFA banner
-- Server tool loop: `resolve_assets` / `search_assets` / `get_chart_context` then structured `content[]`
+- Server tool loop: `resolve_assets` / `refresh_series` / `get_chart_context` / `web_search` / `search_assets` then structured `content[]`
 - Cards only from successful resolve; tap → `loadAsset` → Overview Load Data (`reloadSelected`)
 - Live xAI / non-5.6 OpenAI via `/chat/completions`; OpenAI GPT-5.6 family via `/v1/responses`; deterministic stub when no usable key
 - Default live model **`grok-4.6`** (xAI public id). OpenAI default `gpt-4o-mini`. In-app OpenAI picker also lists `gpt-5.6-sol`, public alias `gpt-5.6` (→ Sol), `gpt-5.6-terra`, and `gpt-5.6-luna`. Provider/model persist in `collections.settings` (no keys)
@@ -1134,7 +1136,7 @@ scoreboard.investments
 ### Ticker text field (any crypto / stock)
 - Overview combo box replaced by ticker text input + Add / Load + optional recent chips
 - Crypto: OKX public swap then spot candles, hourly + daily, watermark per (source, symbol, interval)
-- Stocks: `stock-public` adapter interface only — missing / needs configured adapter; no invented prices
+- Stocks: Yahoo Finance public chart API (`stock-public`, incremental watermark); Stooq daily fallback; no invented prices
 - Series filter keeps unlabeled pack candles as BTC; ingest cannot cross-plot onto another symbol
 - Chat tap-to-load syncs `#ticker-input` via `setSelectedSymbol` / `load-asset.js`
 - Status: **doing**
@@ -1230,5 +1232,5 @@ scoreboard.investments
 ---
 
 **Last Updated:** 2026-09-11  
-**Version:** v1.9 (Chat live xAI/OpenAI + in-app model picker)  
+**Version:** v1.10 (dynamic US equity resolve + Yahoo stock adapter + Chat web_search)  
 **Status:** Not Pooli. No keys client-side. No trades. Research chat (no NFA chrome). Import stays in-browser.

@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert';
 import {
   classifyAssetClass,
+  extractTickerQueries,
   instIdCandidates,
   normalizeTicker,
   resolveOkxInstId
@@ -22,6 +23,7 @@ test('normalizeTicker classifies known crypto vs stock', () => {
   assert.strictEqual(normalizeTicker('SOL').assetClass, 'crypto');
   assert.strictEqual(normalizeTicker('AAPL').assetClass, 'stock');
   assert.strictEqual(normalizeTicker('MSFT').assetClass, 'stock');
+  assert.strictEqual(normalizeTicker('CDNS').assetClass, 'stock');
   assert.strictEqual(normalizeTicker('ZZZ9').assetClass, 'unknown');
 });
 
@@ -47,7 +49,14 @@ test('spot-hinted input tries spot first', () => {
   assert.strictEqual(ids[1].instId, 'SOL-USDT-SWAP');
 });
 
+test('extractTickerQueries keeps CDNS and drops prose', () => {
+  assert.deepStrictEqual(extractTickerQueries('good entry for CDNS'), ['CDNS']);
+  assert.deepStrictEqual(extractTickerQueries('thinking of buying more'), []);
+});
+
 test('stocks have no OKX instId candidates', () => {
   assert.deepStrictEqual(instIdCandidates(normalizeTicker('AAPL')), []);
   assert.strictEqual(classifyAssetClass('AAPL'), 'stock');
+  assert.deepStrictEqual(instIdCandidates(normalizeTicker('CDNS')), []);
+  assert.strictEqual(classifyAssetClass('CDNS'), 'stock');
 });

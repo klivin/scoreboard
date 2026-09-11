@@ -39,8 +39,8 @@ export function adaptersForTicker(symbol, deps = {}) {
 
   if (parsed.assetClass === 'stock') {
     return [
-      createStockAdapter({ symbol: parsed.symbol, interval: '1h' }),
-      createStockAdapter({ symbol: parsed.symbol, interval: '1d' })
+      createStockAdapter({ symbol: parsed.symbol, interval: '1h', ...deps }),
+      createStockAdapter({ symbol: parsed.symbol, interval: '1d', ...deps })
     ];
   }
 
@@ -188,13 +188,13 @@ export function createRefreshRuntime({
 
     try {
       const fetched = await adapter.fetchSince(cursor);
-      if (fetched && fetched.needsAdapter) {
+      if (fetched && (fetched.needsAdapter || (fetched.missing && !(fetched.rows && fetched.rows.length)))) {
         return {
           ...started,
           status: 'missing',
           fetched: 0,
           upserted: 0,
-          rowCount: 0,
+          rowCount: previous && previous.rowCount ? previous.rowCount : 0,
           lastTimestamp: previous && previous.lastTimestamp,
           lastSuccessAt: previous && previous.lastSuccessAt,
           requestUrls: fetched.requestUrls || [],
@@ -202,7 +202,7 @@ export function createRefreshRuntime({
           nextCursor: null,
           mode: adapter.mode,
           note: fetched.note || null,
-          needsAdapter: true,
+          needsAdapter: Boolean(fetched.needsAdapter),
           missing: true
         };
       }
