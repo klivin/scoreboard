@@ -6,15 +6,30 @@ const PACK_CRYPTO = new Set([
   'AVAX', 'BNB', 'BTC', 'DOGE', 'ETH', 'LINK', 'PEPE', 'SHIB', 'SOL', 'SUI', 'TRUMP', 'XRP',
   'ADA', 'DOT', 'MATIC', 'POL', 'ATOM', 'NEAR', 'APT', 'ARB', 'OP', 'LTC', 'BCH',
   'UNI', 'AAVE', 'FIL', 'ICP', 'ETC', 'HBAR', 'ALGO', 'VET', 'MKR', 'INJ', 'SEI',
-  'TIA', 'TON', 'OKB'
+  'TIA', 'TON', 'OKB', 'SKR', 'LEO', 'KCS'
 ]);
 
 const KNOWN_STOCKS = new Set([
   'AAPL', 'MSFT', 'GOOG', 'GOOGL', 'AMZN', 'TSLA', 'NVDA', 'META', 'NFLX', 'AMD',
   'INTC', 'IBM', 'ORCL', 'ADBE', 'CRM', 'AVGO',
-  'JPM', 'BAC', 'V', 'MA',
+  'JPM', 'BAC', 'V', 'MA', 'MSTR', 'COIN', 'IBIT',
   'SPY', 'QQQ', 'IWM', 'DIA', 'VOO', 'VTI'
 ]);
+
+const TICKER_STOPWORDS = new Set([
+  'A', 'I', 'AM', 'AN', 'AS', 'AT', 'BE', 'BY', 'DO', 'GO', 'IF', 'IN', 'IS', 'IT',
+  'ME', 'MY', 'NO', 'OF', 'OK', 'ON', 'OR', 'SO', 'TO', 'UP', 'US', 'WE',
+  'AND', 'ARE', 'BUT', 'BUY', 'CAN', 'FOR', 'GET', 'HAS', 'HOW', 'NOT', 'NOW',
+  'THE', 'TOO', 'WAS', 'WHO', 'WHY', 'YES', 'YOU',
+  'FROM', 'GOOD', 'HAVE', 'INTO', 'JUST', 'MORE', 'THAT', 'THIS', 'WHAT', 'WHEN',
+  'WITH', 'YOUR', 'ABOUT', 'ENTRY', 'LOAD', 'PRICE', 'THINK', 'TODAY'
+]);
+
+function looksLikeUsEquityTicker(symbol) {
+  const upper = String(symbol || '').toUpperCase();
+  if (!upper || TICKER_STOPWORDS.has(upper)) return false;
+  return /^[A-Z]{1,5}$/.test(upper);
+}
 
 export function normalizeTickerInput(raw) {
   const input = raw == null ? '' : String(raw);
@@ -51,7 +66,7 @@ export function normalizeTickerInput(raw) {
 
   let assetClass = 'unknown';
   if (marketHint || PACK_CRYPTO.has(symbol)) assetClass = 'crypto';
-  else if (KNOWN_STOCKS.has(symbol)) assetClass = 'stock';
+  else if (KNOWN_STOCKS.has(symbol) || looksLikeUsEquityTicker(symbol)) assetClass = 'stock';
 
   return { symbol, assetClass, error: null, input };
 }

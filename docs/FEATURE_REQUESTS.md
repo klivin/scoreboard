@@ -266,13 +266,13 @@ npm start
 **Must ship:**
 1. Text input + Add/Load (optional short recent/favorites list). Entering a ticker attempts load. Keep `#symbol-select` as a hidden sync for scanner/forecast jump.
 2. Crypto: OKX public `history-candles` for `{SYM}-USDT-SWAP`, falling back to `{SYM}-USDT` spot when the swap instrument does not exist. Persist `ingest_series` + `ingest_watermarks` per `(source, symbol, interval)` for `1h` and `1d`. Second Load Data sends `before=<watermark − 3 bars>`.
-3. Stocks: no in-repo no-key equity API. Ship the adapter interface (`stock-public`) and an honest “stocks need a configured adapter / missing” path. **Do not invent prices. Do not hardcode fake equity series.**
+3. Stocks: any well-formed US ticker (not a hardcoded allowlist) uses `stock-public` against the **Yahoo Finance public chart API** (Stooq daily CSV fallback). Daily required; hourly when Yahoo returns 1h. Watermark incremental like OKX. Honest empty + note if the public source fails. **Do not invent prices. Do not hardcode fake equity series.**
 4. Charting: same overlays as BTC/ETH for that series. Missing ETF/OI/Ichimoku-from-pack say **missing**.
 5. Do not break BTC/ETH pack charts: unlabeled pack candles/OI stay BTC; ingest rows are filtered by symbol; pack daily indicators merge with ingest OHLC (pack MAs/Ichimoku kept when ingest lacks them).
 
 **Verification:**
-- `npm test` — ticker normalize; mocked HTTP incremental ETH/SOL fetch; stock adapter returns 0 rows + needs-adapter note; ETH ingest 1h does not pollute BTC
-- Localhost: type `ETH` / `SOL` → Add/Load → candles + increment on second Load Data; `AAPL` → honest missing (no fake prices)
+- `npm test` — ticker normalize (CDNS is equity without an allowlist); mocked HTTP incremental ETH/SOL fetch; stock adapter returns Yahoo-shaped rows or honest empty; ETH ingest 1h does not pollute BTC
+- Localhost: type `ETH` / `SOL` → Add/Load → candles + increment on second Load Data; `CDNS` / `AAPL` → Yahoo daily last bar near today (or honest empty if the public source fails)
 - BTC 1d / ETH 1d pack path still plots the correct asset
 
 **Design:** `docs/WIKI.md` (Arbitrary tickers)
@@ -668,13 +668,13 @@ Save as `synthetic-etrade-activity.csv`, `npm start`, Investments tab → choose
 
 **Must ship:**
 1. Chat tab (vanilla HTML/CSS/JS MVC). History in schema-versioned `scoreboard.chat` localStorage. Clear. No NFA banner.
-2. Defined **tool loop** (not UI regex ticker parsing): `resolve_assets`, optional `search_assets`, optional `get_chart_context`. Final assistant turn is structured `content[]` (`text` + `asset_card`). **No card without a successful `resolve_assets` row.** Unknowns: text-only “couldn’t resolve TICKER”.
+2. Defined **tool loop** (not UI regex ticker parsing): `resolve_assets` (dynamic, not catalog-only), `refresh_series` (same Overview ticker path), `get_chart_context`, `web_search`. Final assistant turn is structured `content[]` (`text` + `asset_card`). **No card without a successful `resolve_assets` row.** Junk tokens only: text-only “couldn’t resolve”. Real listed tickers must load + search before that line.
 3. Every resolved stock/crypto is a tappable chip/card. Tap calls `AppController.loadAsset({ symbol, assetClass, intervalHint })` — same Overview symbol + **Load Data** path (`reloadSelected`). Free-text ticker work (PR #14 / `bc-cde1c994`) is **not** on main yet; this seam is thin so that PR can fill `#ticker-input` later. Do **not** duplicate OKX watermark ingest (PR #13).
 4. “load SKR”, “compare MSTR vs BTC” go through tools, not a client regex.
 5. Model wiring: if `OPENAI_API_KEY` or `XAI_API_KEY` / `GROK_API_KEY` is set **server-side**, use that function-calling endpoint. **Never** put keys in the repo or client JS. If no key: full UI + tool loop + card renderer + deterministic **local stub** that exercises resolve → cards → tap-to-load.
 
 **Honesty:**
-- Cards only for catalog-resolved assets. No fake chips.
+- Cards only after `resolve_assets` succeeds. Catalog is hints/tags, not the sole resolve source. Well-formed US tickers (CDNS, …) resolve as equity.
 - `get_chart_context` never invents OHLCV — cached series or “missing”.
 - Buyback / research lists are a labeled static catalog, not a live on-chain feed.
 - House cloud agents stay grok-4.6. In-app chat uses whatever tool-calling key is already on the server, else the stub.
@@ -713,6 +713,29 @@ Save as `synthetic-etrade-activity.csv`, `npm start`, Investments tab → choose
 **Shipped:** zero-dep `.env` loader; canonical `SCOREBOARD_*` vars + legacy aliases; default xAI model id `grok-4.6`; in-app picker persists in `scoreboard.chat` `collections.settings`.
 
 **Design:** `docs/WIKI.md` (Inline Chat pane)
+
+**Priority:** High
+
+---
+
+### Chat + Overview: any US equity (CDNS) without catalog allowlist
+**Status:** done  
+**Request:** Kevin / CoS (2026-09-11). Chat asked for a good entry on **CDNS** (Cadence). Reply was “couldn’t resolve CDNS in Scoreboard’s catalog” — no card, no chart. Root: `resolve_assets` was catalog-only (MSTR/COIN/TSLA/AAPL/NVDA). `stock-adapter.js` was an honest-missing stub. No `web_search`. Prompt forbade cards without resolve.
+
+**Must ship:**
+1. Equities: any well-formed US ticker resolves without a hardcoded allowlist. Catalog stays hints/tags only.
+2. Real keyless stock adapter: Yahoo Finance public chart API (daily required; hourly when Yahoo returns 1h). Stooq daily CSV fallback. Watermark incremental like OKX. Honest empty if the public source fails — **never invent prices**.
+3. Named-ticker Chat tool order: `resolve_assets` → `refresh_series` (same Overview ticker / Load Data path) → `get_chart_context` → `web_search` → `asset_card` + chart-grounded entry notes.
+4. Prompt: never “couldn’t resolve” for a real listed ticker until load+search failed. No NFA banner.
+5. Overview ticker Load Data and Chat tap chart CDNS.
+
+**Verification:**
+- `npm test` — dynamic resolve CDNS; stock adapter recorded Yahoo fixture or honest empty; tool order resolve→refresh→chart→search; no invented live CDNS OHLC
+- Live Yahoo CDNS 1d last bar near today when the VM can reach query1.finance.yahoo.com
+
+**Shipped:** Yahoo `v8/finance/chart` (documented source). Stooq often JS-challenge blocked from this host. Chat tools wired for OpenAI Responses + xAI chat/completions via the existing loop.
+
+**Design:** `docs/WIKI.md` (equity adapter + Chat resolve/search)
 
 **Priority:** High
 
@@ -934,6 +957,6 @@ Save as `synthetic-etrade-activity.csv`, `npm start`, Investments tab → choose
 
 ---
 
-**Last Updated:** 2026-09-11  
+**Last Updated:** 2026-09-11 (CDNS dynamic equity + Yahoo adapter + Chat tool order)  
 **Maintainer:** Kevin (reviewer), updated by Scoreboard team  
 **Status Tracking:** This file updated as features ship

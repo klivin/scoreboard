@@ -1,4 +1,5 @@
 import { defaultCatalog, findCatalogMentions } from './catalog.js';
+import { extractTickerQueries } from '../ticker.js';
 import { cardsFromResolved, flattenContent } from './blocks.js';
 
 function lastUserText(messages) {
@@ -9,20 +10,24 @@ function lastUserText(messages) {
   return '';
 }
 
-function trailingToolResults(messages) {
-  const out = [];
-  for (let i = messages.length - 1; i >= 0; i -= 1) {
-    const msg = messages[i];
-    if (!msg || msg.role !== 'tool') break;
-    let parsed = msg.result;
-    if (parsed == null && typeof msg.content === 'string') {
-      try {
-        parsed = JSON.parse(msg.content);
-      } catch {
-        parsed = {};
-      }
+function parseToolResult(msg) {
+  if (!msg) return {};
+  if (msg.result != null) return msg.result;
+  if (typeof msg.content === 'string') {
+    try {
+      return JSON.parse(msg.content);
+    } catch {
+      return {};
     }
-    out.unshift({ name: msg.name, result: parsed || {} });
+  }
+  return {};
+}
+
+function allToolResults(messages) {
+  const out = [];
+  for (const msg of messages || []) {
+    if (!msg || msg.role !== 'tool') continue;
+    out.push({ name: msg.name, result: parseToolResult(msg) });
   }
   return out;
 }
@@ -46,21 +51,38 @@ export function stubIntent(text, catalog = defaultCatalog()) {
 
   const loadMatch = raw.match(/^\s*load\s+(.+)$/i);
   if (loadMatch) {
-    return { search: false, queries: splitCompareParts(loadMatch[1]) };
+    const parts = splitCompareParts(loadMatch[1]);
+    const extracted = extractTickerQueries(loadMatch[1]);
+    return { search: false, queries: extracted.length ? extracted : parts };
   }
 
   if (/\bcompare\b/i.test(raw) || /\bvs\.?\b/i.test(raw)) {
     const mentions = findCatalogMentions(raw, catalog);
     if (mentions.length) return { search: false, queries: mentions };
+    const extracted = extractTickerQueries(raw);
+    if (extracted.length) return { search: false, queries: extracted };
     return { search: false, queries: splitCompareParts(raw) };
   }
 
   const mentions = findCatalogMentions(raw, catalog);
   if (mentions.length) return { search: false, queries: mentions };
+  const extracted = extractTickerQueries(raw);
+  if (extracted.length) return { search: false, queries: extracted };
   return { search: false, queries: [] };
 }
 
-function stubSummary(userText, results) {
+function latestTool(tools, name) {
+  return [...tools].reverse().find((row) => row.name === name) || null;
+}
+
+function namedTickerResearch(userText, resolveRows) {
+  const ok = (resolveRows || []).filter((row) => row && row.ok);
+  if (!ok.length) return false;
+  if (/\b(buyback|buybacks|burn|burns|repurchase)\b/i.test(userText)) return false;
+  return true;
+}
+
+function stubSummary(userText, results, { chart, search } = {}) {
   const ok = (results || []).filter((row) => row && row.ok);
   const lower = String(userText || '').toLowerCase();
   if (/\b(buyback|buybacks|burn|burns)\b/.test(lower) && ok.length) {
@@ -76,7 +98,21 @@ function stubSummary(userText, results) {
     return `Resolved ${ok.map((row) => row.symbol).join(', ')}. Tap the card to load the Scoreboard chart.`;
   }
   if (ok.length) {
-    return `Research notes for ${ok.map((row) => row.symbol).join(', ')}.`;
+    const parts = [`Research notes for ${ok.map((row) => row.symbol).join(', ')}.`];
+    if (chart && chart.ok && Number.isFinite(chart.last && chart.last.close)) {
+      parts.push(
+        `Cached ${chart.symbol} ${chart.interval} last bar ${chart.last.dateUtc || chart.last.timestamp} close ${chart.last.close} (${chart.barCount} bars).`
+      );
+    } else if (chart && chart.ok === false) {
+      parts.push('Chart cache is empty after refresh — no invented prices.');
+    }
+    const headlines = (search && search.results) || [];
+    const news = headlines.filter((row) => row.source === 'yahoo-news' || row.source === 'duckduckgo').slice(0, 2);
+    if (news.length) {
+      parts.push(`Recent: ${news.map((row) => row.title).join('; ')}.`);
+    }
+    parts.push('Entry thoughts are research-only and tied to the chart plus those headlines.');
+    return parts.join(' ');
   }
   return null;
 }
@@ -87,10 +123,13 @@ export function createStubProvider({ catalog } = {}) {
     id: 'stub',
     model: null,
     async complete(messages) {
-      const tools = trailingToolResults(messages);
+      const tools = allToolResults(messages);
       const userText = lastUserText(messages);
-      const search = [...tools].reverse().find((row) => row.name === 'search_assets');
-      const resolve = [...tools].reverse().find((row) => row.name === 'resolve_assets');
+      const search = latestTool(tools, 'search_assets');
+      const resolve = latestTool(tools, 'resolve_assets');
+      const refresh = latestTool(tools, 'refresh_series');
+      const chart = latestTool(tools, 'get_chart_context');
+      const web = latestTool(tools, 'web_search');
 
       if (search && !resolve) {
         const queries = (search.result.hits || []).map((hit) => hit.query || hit.symbol).filter(Boolean);
@@ -104,9 +143,44 @@ export function createStubProvider({ catalog } = {}) {
       }
 
       if (resolve) {
+        const rows = resolve.result.results || [];
+        const ok = rows.filter((row) => row && row.ok);
+        if (namedTickerResearch(userText, rows)) {
+          if (!refresh) {
+            return {
+              toolCalls: ok.map((row, index) => ({
+                id: `stub_refresh_${index}`,
+                name: 'refresh_series',
+                args: { symbol: row.symbol, scoreboardId: row.scoreboardId }
+              }))
+            };
+          }
+          if (!chart) {
+            return {
+              toolCalls: ok.map((row, index) => ({
+                id: `stub_chart_${index}`,
+                name: 'get_chart_context',
+                args: { scoreboardId: row.scoreboardId }
+              }))
+            };
+          }
+          if (!web) {
+            const symbols = ok.map((row) => row.symbol).join(' ');
+            return {
+              toolCalls: [{
+                id: 'stub_web',
+                name: 'web_search',
+                args: { query: `${symbols} ${userText}`.trim() }
+              }]
+            };
+          }
+        }
         return {
-          content: cardsFromResolved(resolve.result.results || [], {
-            summary: stubSummary(userText, resolve.result.results || [])
+          content: cardsFromResolved(rows, {
+            summary: stubSummary(userText, rows, {
+              chart: chart && chart.result,
+              search: web && web.result
+            })
           })
         };
       }
@@ -135,8 +209,8 @@ export function createStubProvider({ catalog } = {}) {
         content: [{
           type: 'text',
           markdown: [
-            'I can research catalog assets (crypto, a few equities/ETFs) and attach tappable cards after tools resolve them.',
-            'Examples: “what are 5 crypto coins that are doing buybacks”, “load SKR”, “compare MSTR vs BTC”.'
+            'I can research listed US tickers and catalog crypto, then attach tappable cards after tools resolve them.',
+            'Ask about a ticker (CDNS, MSTR, BTC), or try “what are 5 crypto coins that are doing buybacks”, “load SKR”, “compare MSTR vs BTC”.'
           ].join(' ')
         }]
       };

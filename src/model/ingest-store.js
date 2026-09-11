@@ -93,7 +93,9 @@ export function applySeriesStoreToPack(pack, seriesItems) {
   if (!pack) return pack;
   const items = seriesItems || [];
 
-  pack.live_candles = items.filter((row) => row && row.source === 'okx-candles');
+  pack.live_candles = items.filter((row) => (
+    row && (row.source === 'okx-candles' || row.source === 'stock-public')
+  ));
 
   const candles1h = items.filter((row) => (
     row.source === 'okx-candles' && row.interval === '1h' && isBtcSymbol(row.symbol)

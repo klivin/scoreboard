@@ -26,6 +26,7 @@ test('UI ticker normalize matches ETH / SOL / AAPL entry', () => {
   assert.strictEqual(normalizeTickerInput('eth').symbol, 'ETH');
   assert.strictEqual(normalizeTickerInput('SOL').assetClass, 'crypto');
   assert.strictEqual(normalizeTickerInput('AAPL').assetClass, 'stock');
+  assert.strictEqual(normalizeTickerInput('CDNS').assetClass, 'stock');
   assert.strictEqual(normalizeTickerInput('ETH-USDT-SWAP').symbol, 'ETH');
 });
 

@@ -324,11 +324,36 @@ test('daily ingest tail merges onto pack ETH without replacing Ichimoku', () => 
   assert.strictEqual(merged[1].close, 3310);
 });
 
-test('AAPL missing series names the stock adapter gap', () => {
-  assert.match(missingSeriesMessage('AAPL', '1d', { assetClass: 'stock' }), /configured adapter/);
+test('AAPL missing series names the public equity source gap', () => {
+  assert.match(missingSeriesMessage('AAPL', '1d', { assetClass: 'stock' }), /Yahoo Finance/);
   const model = new SeriesModel();
   model.replaceData(makePack());
-  assert.throws(() => model.getSeries('AAPL', '1d'), /configured adapter/);
+  assert.throws(() => model.getSeries('AAPL', '1d'), /Yahoo Finance/);
+});
+
+test('CDNS daily series charts stock-public ingest rows', () => {
+  const model = new SeriesModel();
+  const pack = makePack();
+  pack.live_candles = [
+    {
+      source: 'stock-public',
+      symbol: 'CDNS',
+      interval: '1d',
+      timestamp: Date.parse('2026-09-11T13:30:00Z'),
+      datetime_utc: '2026-09-11 13:30:00',
+      date_utc: '2026-09-11',
+      open: 288.18,
+      high: 293.4,
+      low: 285.02,
+      close: 289.37,
+      volume: 2539982
+    }
+  ];
+  model.replaceData(pack);
+  const series = model.getSeries('CDNS', '1d');
+  assert.strictEqual(series.length, 1);
+  assert.strictEqual(series[0].close, 289.37);
+  assert.strictEqual(calendarDateKey(series[0]), '2026-09-11');
 });
 
 test('ETH series does not inherit BTC open interest', () => {

@@ -90,7 +90,7 @@ export function missingSeriesMessage(symbol, interval, extra = {}) {
   const intervalNorm = interval === '1h' ? '1h' : '1d';
   const sym = String(symbol || '').toUpperCase();
   if (extra.assetClass === 'stock' || extra.needsStockAdapter) {
-    return `No data available for ${sym} ${intervalNorm}. Stocks need a configured adapter — no no-key public equity candle source is wired. Prices are not invented.`;
+    return `No data available for ${sym} ${intervalNorm}. Public equity source (Yahoo Finance chart API; Stooq daily fallback) returned no candles. Prices are not invented.`;
   }
   if (intervalNorm === '1h' && !isBtcSymbol(sym)) {
     return `No 1h series for ${sym}. Load Data fetches OKX public ${sym}-USDT-SWAP (or spot) candles incrementally. The Flow pack only includes hourly OKX BTC (okx_btc_usdt_swap_candles_1h.csv). Alt 1h is not interpolated from daily. Missing readings are not plotted as 0.`;
@@ -98,7 +98,7 @@ export function missingSeriesMessage(symbol, interval, extra = {}) {
   if (intervalNorm === '1h' && isBtcSymbol(sym)) {
     return `No 1h series for BTC. Place okx_btc_usdt_swap_candles_1h.csv in /workspace/scoreboard/ or ./data/.`;
   }
-  return `No data available for ${sym} ${intervalNorm}. Crypto Load Data uses OKX public ${sym}-USDT-SWAP or ${sym}-USDT candles. Stocks need a configured adapter (none is wired; prices are not invented).`;
+  return `No data available for ${sym} ${intervalNorm}. Crypto Load Data uses OKX public ${sym}-USDT-SWAP or ${sym}-USDT candles. Equities use Yahoo Finance public chart API (Stooq daily fallback). Prices are not invented.`;
 }
 
 export function mapIndicatorRow(row) {
@@ -304,7 +304,7 @@ export class SeriesModel {
     const live = (this.data.live_candles || [])
       .filter((row) => (
         row
-        && (row.source == null || row.source === 'okx-candles')
+        && (row.source == null || row.source === 'okx-candles' || row.source === 'stock-public')
         && String(row.symbol || '').toUpperCase() === upper
         && (row.interval == null || row.interval === intervalNorm)
       ))

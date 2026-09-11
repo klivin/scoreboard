@@ -1,0 +1,33 @@
+{
+  "_label": "RECORDED_FIXTURE_NOT_LIVE",
+  "_source": "Yahoo Finance public chart API query1.finance.yahoo.com/v8/finance/chart/CDNS?interval=1d&range=5d",
+  "_capturedAt": "2026-09-11T21:00:00Z",
+  "_note": "Recorded public CDNS daily bars for parser tests. Not a live price claim. Do not treat as current market data.",
+  "chart": {
+    "result": [
+      {
+        "meta": {
+          "currency": "USD",
+          "symbol": "CDNS",
+          "exchangeName": "NMS",
+          "instrumentType": "EQUITY",
+          "shortName": "Cadence Design Systems, Inc.",
+          "longName": "Cadence Design Systems, Inc."
+        },
+        "timestamp": [1788528600, 1788874200, 1788960600, 1789047000, 1789133400],
+        "indicators": {
+          "quote": [
+            {
+              "volume": [4224500, 4402100, 2300400, 1923000, 2539982],
+              "open": [305.9599914550781, 291.3399963378906, 283.8500061035156, 282.2799987792969, 288.17999267578125],
+              "high": [308.29998779296875, 295.82000732421875, 287.760009765625, 289.1400146484375, 293.3999938964844],
+              "low": [287.8999938964844, 282.67999267578125, 281.6499938964844, 282.2799987792969, 285.0199890136719],
+              "close": [292.70001220703125, 284.1099853515625, 284.6000061035156, 284.95001220703125, 289.3699951171875]
+            }
+          ]
+        }
+      }
+    ],
+    "error": null
+  }
+}

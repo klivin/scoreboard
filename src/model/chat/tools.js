@@ -1,23 +1,30 @@
 import { seriesModel } from '../series.js';
+import { getRefreshRuntime } from '../refresh.js';
+import {
+  classifyAssetClass,
+  looksLikeUsEquityTicker,
+  normalizeTicker
+} from '../ticker.js';
 import {
   defaultCatalog,
   lookupAsset,
   parseScoreboardId
 } from './catalog.js';
+import { webSearch as defaultWebSearch } from './web-search.js';
 
 export const TOOL_DEFINITIONS = [
   {
     type: 'function',
     function: {
       name: 'resolve_assets',
-      description: 'Resolve investment names or tickers to Scoreboard assets. Reject unknowns. Required before any asset_card.',
+      description: 'Resolve investment names or tickers to Scoreboard assets. Catalog is hints/tags only. Well-formed US tickers (e.g. CDNS) resolve as equity without an allowlist. Required before any asset_card.',
       parameters: {
         type: 'object',
         properties: {
           queries: {
             type: 'array',
             items: { type: 'string' },
-            description: 'Names or symbols to resolve (e.g. Bitcoin, MSTR, SKR).'
+            description: 'Names or symbols to resolve (e.g. Bitcoin, CDNS, Cadence, SKR).'
           }
         },
         required: ['queries']
@@ -28,7 +35,7 @@ export const TOOL_DEFINITIONS = [
     type: 'function',
     function: {
       name: 'search_assets',
-      description: 'Search the research catalog for a natural-language list (e.g. coins doing buybacks). Then call resolve_assets on the hit symbols.',
+      description: 'Search the research catalog for a natural-language list (e.g. coins doing buybacks). Then call resolve_assets on the hit symbols. Catalog tags only — not a live chain feed.',
       parameters: {
         type: 'object',
         properties: {
@@ -41,14 +48,43 @@ export const TOOL_DEFINITIONS = [
   {
     type: 'function',
     function: {
+      name: 'refresh_series',
+      description: 'Load/refresh cached OHLC for a resolved symbol using the same Overview ticker path (OKX crypto or Yahoo equity). Call after resolve_assets and before get_chart_context.',
+      parameters: {
+        type: 'object',
+        properties: {
+          symbol: { type: 'string', description: 'Ticker such as CDNS or BTC' },
+          scoreboardId: { type: 'string', description: 'Optional equity:CDNS / crypto:BTC' },
+          interval: { type: 'string', description: 'Optional 1d or 1h filter; omit to refresh both like Overview Load Data' }
+        }
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
       name: 'get_chart_context',
-      description: 'Return cached series metadata for a scoreboardId. Never invent OHLCV. Missing series return ok:false.',
+      description: 'Return cached series metadata for a scoreboardId after refresh_series. Never invent OHLCV. Missing series return ok:false.',
       parameters: {
         type: 'object',
         properties: {
           scoreboardId: { type: 'string' }
         },
         required: ['scoreboardId']
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'web_search',
+      description: 'Keyless public web/news search for valuation, levels, and recent headlines. Call after chart context for named-ticker questions.',
+      parameters: {
+        type: 'object',
+        properties: {
+          query: { type: 'string' }
+        },
+        required: ['query']
       }
     }
   }
@@ -60,37 +96,132 @@ function intervalHintFor(asset, query) {
   return '1d';
 }
 
+function chatAssetClass(className) {
+  if (className === 'stock' || className === 'equity') return 'equity';
+  if (className === 'etf') return 'etf';
+  if (className === 'crypto') return 'crypto';
+  return className || 'other';
+}
+
+function dynamicEquityAsset(symbol, query) {
+  const upper = String(symbol).toUpperCase();
+  return {
+    symbol: upper,
+    name: upper,
+    assetClass: 'equity',
+    venue: 'yahoo',
+    scoreboardId: `equity:${upper}`,
+    blurb: `${upper} US equity. Catalog is hints only — this ticker resolved dynamically. Charting uses Yahoo Finance public candles.`,
+    strategyConsiderations: [
+      'Confirm the daily series on Overview after Load Data; missing bars stay missing.',
+      'Entry notes must use get_chart_context plus web/news — never invented OHLC.'
+    ],
+    aliases: [],
+    tags: [],
+    catalogHint: false,
+    query
+  };
+}
+
+function dynamicCryptoAsset(symbol, query) {
+  const upper = String(symbol).toUpperCase();
+  return {
+    symbol: upper,
+    name: upper,
+    assetClass: 'crypto',
+    venue: 'okx',
+    scoreboardId: `crypto:${upper}`,
+    blurb: `${upper} crypto. Resolved from ticker classification (not catalog-only). OKX public candles when the instrument exists.`,
+    strategyConsiderations: [
+      'Confirm series on Overview; missing data stays missing.'
+    ],
+    aliases: [],
+    tags: [],
+    catalogHint: false,
+    query
+  };
+}
+
 export function resolveOne(query, catalog = defaultCatalog()) {
   const q = query == null ? '' : String(query);
-  const asset = lookupAsset(q, catalog);
-  if (!asset) {
+  const catalogAsset = lookupAsset(q, catalog);
+  if (catalogAsset) {
     return {
-      ok: false,
+      ok: true,
       query: q,
-      symbol: null,
-      name: null,
-      assetClass: null,
-      venue: null,
-      scoreboardId: null,
-      load: null,
-      reason: 'unknown'
+      symbol: catalogAsset.symbol,
+      name: catalogAsset.name,
+      assetClass: catalogAsset.assetClass,
+      venue: catalogAsset.venue,
+      scoreboardId: catalogAsset.scoreboardId,
+      blurb: catalogAsset.blurb,
+      strategyConsiderations: catalogAsset.strategyConsiderations,
+      catalogHint: true,
+      load: {
+        symbol: catalogAsset.symbol,
+        assetClass: catalogAsset.assetClass,
+        intervalHint: intervalHintFor(catalogAsset, q)
+      }
     };
   }
-  return {
-    ok: true,
-    query: q,
-    symbol: asset.symbol,
-    name: asset.name,
-    assetClass: asset.assetClass,
-    venue: asset.venue,
-    scoreboardId: asset.scoreboardId,
-    blurb: asset.blurb,
-    strategyConsiderations: asset.strategyConsiderations,
-    load: {
-      symbol: asset.symbol,
-      assetClass: asset.assetClass,
-      intervalHint: intervalHintFor(asset, q)
+
+  const parsed = normalizeTicker(q);
+  if (parsed.symbol && !parsed.error) {
+    const classified = parsed.assetClass !== 'unknown'
+      ? parsed.assetClass
+      : classifyAssetClass(parsed.symbol, parsed.marketHint);
+    if (classified === 'crypto') {
+      const asset = dynamicCryptoAsset(parsed.symbol, q);
+      return {
+        ok: true,
+        query: q,
+        symbol: asset.symbol,
+        name: asset.name,
+        assetClass: asset.assetClass,
+        venue: asset.venue,
+        scoreboardId: asset.scoreboardId,
+        blurb: asset.blurb,
+        strategyConsiderations: asset.strategyConsiderations,
+        catalogHint: false,
+        load: {
+          symbol: asset.symbol,
+          assetClass: asset.assetClass,
+          intervalHint: intervalHintFor(asset, q)
+        }
+      };
     }
+    if (classified === 'stock' || looksLikeUsEquityTicker(parsed.symbol)) {
+      const asset = dynamicEquityAsset(parsed.symbol, q);
+      return {
+        ok: true,
+        query: q,
+        symbol: asset.symbol,
+        name: asset.name,
+        assetClass: chatAssetClass('equity'),
+        venue: asset.venue,
+        scoreboardId: asset.scoreboardId,
+        blurb: asset.blurb,
+        strategyConsiderations: asset.strategyConsiderations,
+        catalogHint: false,
+        load: {
+          symbol: asset.symbol,
+          assetClass: 'equity',
+          intervalHint: intervalHintFor(asset, q)
+        }
+      };
+    }
+  }
+
+  return {
+    ok: false,
+    query: q,
+    symbol: null,
+    name: null,
+    assetClass: null,
+    venue: null,
+    scoreboardId: null,
+    load: null,
+    reason: parsed.error || 'not a well-formed ticker'
   };
 }
 
@@ -143,7 +274,7 @@ export function searchAssets(naturalQuery, catalog = defaultCatalog()) {
 
   return {
     hits: scored.map((row) => toHit(row.asset)),
-    note: scored.length ? null : 'No catalog hits.'
+    note: scored.length ? 'Catalog hints only — not the sole resolve source.' : 'No catalog hits. Try resolve_assets on a ticker, then refresh_series.'
   };
 }
 
@@ -191,8 +322,61 @@ export function getChartContext(scoreboardId, { getSeries = defaultGetSeries } =
   };
 }
 
-export function createToolRunner({ catalog, getSeries } = {}) {
+function summarizeRefreshRan(ran) {
+  return (ran || []).map((row) => ({
+    id: row.id,
+    symbol: row.symbol,
+    interval: row.interval,
+    status: row.status,
+    rowCount: row.rowCount,
+    lastTimestamp: row.lastTimestamp,
+    note: row.note || null,
+    error: row.error || null
+  }));
+}
+
+export async function defaultRefreshSeries({ symbol, scoreboardId, interval } = {}) {
+  let ticker = symbol;
+  if (!ticker && scoreboardId) {
+    const parsed = parseScoreboardId(scoreboardId);
+    ticker = parsed && parsed.symbol;
+  }
+  ticker = String(ticker || '').toUpperCase();
+  if (!ticker) {
+    return { ok: false, reason: 'missing symbol', ran: [] };
+  }
+  const runtime = getRefreshRuntime();
+  const result = await runtime.runRefresh({
+    symbol: ticker,
+    ...(interval ? { interval } : {})
+  });
+  try {
+    seriesModel.load();
+  } catch {
+    // pack may be absent; ingest store still applies on next getSeries
+  }
+  const ran = summarizeRefreshRan(result.ran);
+  const loaded = ran.some((row) => row.status === 'ok' && Number(row.rowCount) > 0);
+  return {
+    ok: loaded,
+    symbol: ticker,
+    interval: interval || null,
+    ran,
+    note: loaded
+      ? 'Refreshed via the same Overview ticker / Load Data path.'
+      : 'Refresh ran; no cached bars yet. Public source may have returned empty — prices were not invented.'
+  };
+}
+
+export function createToolRunner({
+  catalog,
+  getSeries,
+  refreshSeries,
+  webSearch
+} = {}) {
   const cat = catalog || defaultCatalog();
+  const refresh = refreshSeries || defaultRefreshSeries;
+  const searchWeb = webSearch || defaultWebSearch;
   return {
     definitions: TOOL_DEFINITIONS,
     execute(name, args = {}) {
@@ -202,8 +386,18 @@ export function createToolRunner({ catalog, getSeries } = {}) {
       if (name === 'search_assets') {
         return searchAssets(args.naturalQuery || '', cat);
       }
+      if (name === 'refresh_series') {
+        return refresh({
+          symbol: args.symbol,
+          scoreboardId: args.scoreboardId,
+          interval: args.interval
+        });
+      }
       if (name === 'get_chart_context') {
         return getChartContext(args.scoreboardId, { getSeries: getSeries || defaultGetSeries });
+      }
+      if (name === 'web_search') {
+        return searchWeb(args.query || args.naturalQuery || '');
       }
       return { error: `unknown tool: ${name}` };
     }

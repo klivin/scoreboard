@@ -193,7 +193,10 @@ export function createOkxCandleAdapter({
         ? [{ market, instId: primaryInst }]
         : (instIdCandidates(parsed).length
           ? instIdCandidates(parsed)
-          : [{ market, instId: primaryInst }]);
+          : [
+            { market: 'swap', instId: parsed.instIdSwap || `${upper}-USDT-SWAP` },
+            { market: 'spot', instId: parsed.instIdSpot || `${upper}-USDT` }
+          ]);
 
       let lastError = null;
       for (let i = 0; i < candidates.length; i++) {
