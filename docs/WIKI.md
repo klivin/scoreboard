@@ -177,9 +177,11 @@ Unknown tickers (not in the small known-stock list) **attempt OKX**. If the inst
 **Series merge (do not break BTC/ETH)**
 
 - Pack OKX candle/OI CSVs often have **no `symbol` column**. Unlabeled pack rows are **BTC only**.
+- Ingest overlay keys by `symbol|timestamp` (unlabeled pack = BTC). A later BTC refresh must not erase ETH/SOL bars that share the same clock time.
 - Ingest rows always carry `symbol`. `getSeries` / `getLiveCandles` filter labeled rows by ticker so ETH/SOL ingest cannot land on the BTC chart.
 - Daily: `mergeDailyPreferLive` — pack `indicators_daily.csv` (MAs / Ichimoku) merges with live ingest daily OHLC by calendar date. Live OKX OHLC wins; pack indicator columns are kept when ingest does not provide them. Live-only dates append. Pack-only null-close tails are dropped.
 - Hourly: `getLiveCandles` (BTC pack overlay + `live_candles` / ingest). Daily is never interpolated into 1h.
+- Non-BTC ingest lives on `pack.live_candles`; BTC pack candle CSVs stay BTC-only.
 
 **Stocks — documented gap**
 
