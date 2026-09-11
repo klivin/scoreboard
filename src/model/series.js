@@ -90,16 +90,30 @@ export function calendarDateKey(row) {
   return null;
 }
 
+export function hasFiniteClose(row) {
+  return Boolean(row) && Number.isFinite(row.close);
+}
+
+export function trimTrailingNonFiniteCloses(rows) {
+  const out = Array.isArray(rows) ? rows.slice() : [];
+  while (out.length && !hasFiniteClose(out[out.length - 1])) {
+    out.pop();
+  }
+  return out;
+}
+
 export function mergeDailyPreferLive(packRows, liveRows) {
   const pack = Array.isArray(packRows) ? packRows : [];
   const live = Array.isArray(liveRows) ? liveRows : [];
-  if (live.length === 0) return pack.slice();
-  if (pack.length === 0) return live.slice();
+  if (pack.length === 0 && live.length === 0) return [];
 
   const map = new Map();
   for (const row of pack) {
     const key = calendarDateKey(row);
     if (!key) continue;
+    // Pack probe rows often extend past the last live day with close:null.
+    // Those stubs must not become the chart's last bar. Do not invent closes.
+    if (!hasFiniteClose(row)) continue;
     map.set(key, row);
   }
   for (const row of live) {
@@ -117,7 +131,9 @@ export function mergeDailyPreferLive(packRows, liveRows) {
       timestamp: Number.isFinite(row.timestamp) ? row.timestamp : existing.timestamp
     });
   }
-  return [...map.values()].sort((a, b) => a.timestamp - b.timestamp);
+  return trimTrailingNonFiniteCloses(
+    [...map.values()].sort((a, b) => a.timestamp - b.timestamp)
+  );
 }
 
 function parseSinceExclusive(since) {
