@@ -598,6 +598,38 @@ Save as `synthetic-etrade-activity.csv`, `npm start`, Investments tab → choose
 
 ---
 
+### Watch / Track rows (open vs close) — not a transaction ledger
+**Status:** doing  
+**Request:** Kevin does not like the TRACKING / Investments screen. Missing useful tracking tools. Rewrite so **WATCH / TRACK rows** are the primary UI (not a fill/ledger dump). Useful for deciding **open vs close**. Real E*TRADE positions stay secondary and distinct.
+
+**Verified before the rewrite (do not re-guess):**
+1. UI was ledger-first: REAL section listed every imported transaction; watch/start-track was buried under paper BUY/SELL.
+2. Mark and Unrealized were always `missing` in the UI — `InvestmentsController.markPrices` stayed `{}` and was never filled from Overview ingest.
+3. Activity `Price × Qty` lots were correct when the file was an Activity export. **Cost Basis / Average Cost / Last Price** headers were not in `HEADER_ALIASES`. A Positions/holdings CSV failed with “No recognized Activity CSV columns”, so cost never landed. If Price/Last Price (mark) were treated as fill cost, basis would equal mark and unrealized would be $0.
+
+**Must ship:**
+1. Add a symbol + target. Direction defaults to long / call / buy. Start date is a date picker defaulting to today. Put/sell is available (cheap).
+2. On Refresh, load **current price** via the same incremental ingest as Overview (`POST /api/refresh?symbol=` then `GET /api/indicators` — Yahoo equities / OKX crypto). Do not invent prices. Missing stays missing.
+3. Each watch row: symbol, start date, cost/entry (if a REAL lot exists) or start mark, live mark, % gain/loss, target, in-range badge. In-zone rows are visually obvious and pinned to the top.
+   - Long, no lot: **buy zone** when mark ≤ target (open).
+   - Long, has REAL lot: **sell zone** when mark ≥ target (close).
+   - Short is the inverse. Optional target-to makes a range.
+4. REAL positions (secondary): cost, mark, unrealized $, %. Paper/tracking vs REAL stay distinct.
+5. E*TRADE Positions mapping: Cost Basis / Average Cost → lot cost. Last Price / Price → mark hint only, never cost. Activity fills still use Price. FileReader only; synthetic fixtures only.
+6. Hide/bury the transaction ledger (`<details>`). No transaction dump as the primary view.
+
+**Verification:**
+- `npm test` — 259/259. Watch % / in-zone / pin; Positions Cost Basis ≠ Last Price; primary HTML is watchlist not ledger
+- Localhost UI (2026-09-11, synthetic Positions CSV only — not Kevin’s E*TRADE file): Watch / Track tab. Add CDNS target 300 start=today → Refresh: live mark **$289.37** (Yahoo ingest), % vs start, **buy zone** (mark ≤ 300). Import synthetic Positions → FAKE1 qty 6, cost **$150.00** (not $240 last-price), mark $40, unrealized **$90.00 / 60%**. FAKE3 no lot (no cost). Ledger collapsed in details. File stays in the browser.
+
+**Privacy:** never commit/upload Kevin’s private CSV. No brokerage keys. No live trades. Not Pooli.
+
+**Design:** `docs/WIKI.md` (Investments / Watch / Track)
+
+**Priority:** High
+
+---
+
 ### Forecasts tab (scored history)
 **Status:** doing  
 **Request:** The Forecasts tab must list **actual scored forecasts**, not a dead generate-cards page. Second product slice after Investments. Research/paper only — no keys, no trades, not Pooli.

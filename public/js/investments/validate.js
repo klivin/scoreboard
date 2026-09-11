@@ -1,4 +1,4 @@
-import { parseActivityCsv } from './csv.js';
+import { parseBrokerageCsv } from './csv.js';
 import { normalizeRows } from './parse.js';
 
 export function missingLabel(value) {
@@ -42,10 +42,11 @@ export function validateEvents(events) {
 }
 
 export function previewImport(csvText, options = {}) {
-  const parsed = parseActivityCsv(csvText);
+  const parsed = parseBrokerageCsv(csvText);
   const events = normalizeRows(parsed.rows, {
     badge: 'REAL',
     source: 'import',
+    kind: parsed.kind || 'activity',
     symbolMaps: options.symbolMaps || [],
     idPrefix: options.idPrefix || `imp_${Date.now()}`
   });
@@ -53,6 +54,7 @@ export function previewImport(csvText, options = {}) {
   const allErrors = [...parsed.errors, ...errors];
 
   return {
+    kind: parsed.kind,
     headers: parsed.headers,
     canonicalHeaders: parsed.canonicalHeaders,
     rawRows: parsed.rows,

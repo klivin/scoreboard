@@ -57,8 +57,23 @@ export function validatePaperTrade(input) {
   };
 }
 
+export function todayIsoDate(now = new Date()) {
+  const yyyy = now.getFullYear();
+  const mm = String(now.getMonth() + 1).padStart(2, '0');
+  const dd = String(now.getDate()).padStart(2, '0');
+  return `${yyyy}-${mm}-${dd}`;
+}
+
+export function normalizeDirection(value) {
+  const text = String(value || '').trim().toLowerCase();
+  if (['put', 'sell', 'short', 'bear', 'bearish'].includes(text)) return 'short';
+  return 'long';
+}
+
 export function trackingForwardPerformance(record, markPrice) {
-  const baseline = record && Number.isFinite(record.baselinePrice) ? record.baselinePrice : null;
+  const baseline = record && Number.isFinite(record.baselinePrice)
+    ? record.baselinePrice
+    : (record && Number.isFinite(record.startMark) ? record.startMark : null);
   const mark = record && record.status === 'stopped' && Number.isFinite(record.stopPrice)
     ? record.stopPrice
     : (Number.isFinite(markPrice) ? markPrice : null);
@@ -73,31 +88,56 @@ export function trackingForwardPerformance(record, markPrice) {
       status: record ? record.status : null
     };
   }
+  const raw = (mark - baseline) / baseline;
+  const direction = normalizeDirection(record && record.direction);
   return {
     badge: 'TRACKING',
     symbol: record.symbol,
     startDate: record.startDate,
     baselinePrice: baseline,
     markPrice: mark,
-    returnPct: (mark - baseline) / baseline,
+    returnPct: direction === 'short' ? -raw : raw,
     status: record.status
   };
 }
 
-export function startTrackingInput(input) {
+export function startTrackingInput(input = {}, now = new Date()) {
   const errors = [];
-  if (!input.symbol || !String(input.symbol).trim()) errors.push('Tracking symbol is required');
-  if (!input.startDate) errors.push('Tracking start date is required');
-  if (input.baselinePrice == null || !Number.isFinite(Number(input.baselinePrice))) {
-    errors.push('Tracking baseline price is required');
+  const symbol = input.symbol ? String(input.symbol).trim().toUpperCase() : '';
+  const startDate = input.startDate || todayIsoDate(now);
+  const baselineRaw = input.baselinePrice;
+  const baselinePrice = baselineRaw == null || baselineRaw === '' ? null : Number(baselineRaw);
+  const targetRaw = input.targetPrice;
+  const targetPrice = targetRaw == null || targetRaw === '' ? null : Number(targetRaw);
+  const targetHighRaw = input.targetHigh;
+  const targetHigh = targetHighRaw == null || targetHighRaw === '' ? null : Number(targetHighRaw);
+  const direction = normalizeDirection(input.direction);
+
+  if (!symbol) errors.push('Tracking symbol is required');
+  if (!startDate) errors.push('Tracking start date is required');
+  if (baselineRaw != null && baselineRaw !== '' && !Number.isFinite(baselinePrice)) {
+    errors.push('Tracking start mark must be a number when provided');
   }
+  if (input.requireTarget && !Number.isFinite(targetPrice)) {
+    errors.push('Target price is required');
+  } else if (targetRaw != null && targetRaw !== '' && !Number.isFinite(targetPrice)) {
+    errors.push('Target price must be a number when provided');
+  }
+  if (targetHighRaw != null && targetHighRaw !== '' && !Number.isFinite(targetHigh)) {
+    errors.push('Target range high must be a number when provided');
+  }
+
   return {
     ok: errors.length === 0,
     errors,
     record: {
-      symbol: String(input.symbol || '').trim().toUpperCase(),
-      startDate: input.startDate,
-      baselinePrice: Number(input.baselinePrice)
+      symbol,
+      startDate,
+      baselinePrice: Number.isFinite(baselinePrice) ? baselinePrice : null,
+      startMark: Number.isFinite(baselinePrice) ? baselinePrice : null,
+      targetPrice: Number.isFinite(targetPrice) ? targetPrice : null,
+      targetHigh: Number.isFinite(targetHigh) ? targetHigh : null,
+      direction
     }
   };
 }

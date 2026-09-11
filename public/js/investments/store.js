@@ -167,7 +167,13 @@ export class InvestmentsStore {
       badge: 'TRACKING',
       symbol: String(record.symbol || '').toUpperCase(),
       startDate: record.startDate,
-      baselinePrice: record.baselinePrice,
+      baselinePrice: record.baselinePrice == null ? null : record.baselinePrice,
+      startMark: record.startMark == null
+        ? (record.baselinePrice == null ? null : record.baselinePrice)
+        : record.startMark,
+      targetPrice: record.targetPrice == null ? null : record.targetPrice,
+      targetHigh: record.targetHigh == null ? null : record.targetHigh,
+      direction: record.direction === 'short' ? 'short' : 'long',
       startedAt: record.startedAt || Date.now(),
       stoppedAt: null,
       stopDate: null,
@@ -176,11 +182,21 @@ export class InvestmentsStore {
       history: [{
         action: 'start',
         date: record.startDate,
-        price: record.baselinePrice,
+        price: record.baselinePrice == null ? record.startMark : record.baselinePrice,
         at: record.startedAt || Date.now()
       }]
     };
     state.collections.tracking.push(item);
+    this.save();
+    return item;
+  }
+
+  updateTracking(id, patch = {}) {
+    const state = this.getState();
+    const item = state.collections.tracking.find((row) => row.id === id);
+    if (!item) return null;
+    const next = { ...item, ...patch, id: item.id, badge: 'TRACKING' };
+    Object.assign(item, next);
     this.save();
     return item;
   }

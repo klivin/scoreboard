@@ -29,12 +29,38 @@ const HEADER_ALIASES = {
   'cusip': 'Cusip',
   'quantity': 'Quantity',
   'qty': 'Quantity',
+  'shares': 'Quantity',
   'price': 'Price',
+  'price per share': 'Price',
+  'unit price': 'Price',
+  'share price': 'Price',
   'amount': 'Amount',
   'commission': 'Commission',
   'category': 'Category',
   'note': 'Note',
-  'notes': 'Note'
+  'notes': 'Note',
+  'cost basis': 'CostBasis',
+  'costbasis': 'CostBasis',
+  'total cost': 'CostBasis',
+  'cost': 'CostBasis',
+  'average cost': 'AverageCost',
+  'avg cost': 'AverageCost',
+  'avg. cost': 'AverageCost',
+  'average price': 'AverageCost',
+  'avg price': 'AverageCost',
+  'avg. price': 'AverageCost',
+  'unit cost': 'AverageCost',
+  'last price': 'LastPrice',
+  'last': 'LastPrice',
+  'current price': 'LastPrice',
+  'mark': 'LastPrice',
+  'market value': 'MarketValue',
+  'marketvalue': 'MarketValue',
+  'mkt value': 'MarketValue',
+  'value': 'MarketValue',
+  'as of': 'AsOfDate',
+  'as of date': 'AsOfDate',
+  'name': 'Description'
 };
 
 export { CANONICAL_COLUMNS };
@@ -45,8 +71,9 @@ export function normalizeHeader(name) {
     .trim()
     .toLowerCase()
     .replace(/[_]+/g, ' ')
+    .replace(/[#\$]+/g, '')
+    .replace(/[()]/g, '')
     .replace(/\s+/g, ' ')
-    .replace(/[#\$]+$/g, '')
     .trim();
 }
 
@@ -102,6 +129,24 @@ export function findActivityHeaderIndex(lines) {
   for (let i = 0; i < lines.length; i += 1) {
     if (String(lines[i] || '').trim() === '') continue;
     if (isActivityHeaderRow(parseCsvLine(lines[i]))) return i;
+  }
+  return -1;
+}
+
+const POSITION_COST_HEADERS = new Set(['CostBasis', 'AverageCost', 'LastPrice', 'MarketValue', 'Price']);
+
+export function isPositionsHeaderRow(cells) {
+  const mapped = (cells || []).map((cell) => mapHeader(cell));
+  if (mapped.includes('Activity/Trade Date') || mapped.includes('Activity Type')) return false;
+  return mapped.includes('Symbol')
+    && mapped.includes('Quantity')
+    && mapped.some((name) => POSITION_COST_HEADERS.has(name));
+}
+
+export function findPositionsHeaderIndex(lines) {
+  for (let i = 0; i < lines.length; i += 1) {
+    if (String(lines[i] || '').trim() === '') continue;
+    if (isPositionsHeaderRow(parseCsvLine(lines[i]))) return i;
   }
   return -1;
 }
@@ -224,7 +269,106 @@ export function parseActivityCsv(text) {
     rows,
     errors,
     headerLineNumber: headerIndex + 1,
-    stoppedAtFooter
+    stoppedAtFooter,
+    kind: 'activity'
+  };
+}
+
+/**
+ * E*TRADE / Morgan Stanley Positions (holdings) snapshot.
+ * Cost Basis / Average Cost become lot cost. Price / Last Price is mark only —
+ * never used as cost (that was the import bug: mark landed in basis).
+ */
+export function parsePositionsCsv(text) {
+  const lines = splitCsvLines(text);
+  const nonEmpty = lines.filter((line) => line.trim() !== '');
+  if (nonEmpty.length === 0) {
+    return {
+      headers: [],
+      canonicalHeaders: [],
+      rows: [],
+      errors: ['CSV is empty'],
+      headerLineNumber: null,
+      kind: 'positions'
+    };
+  }
+
+  const headerIndex = findPositionsHeaderIndex(lines);
+  if (headerIndex === -1) {
+    return {
+      headers: parseCsvLine(nonEmpty[0]).map((h) => h.trim()),
+      canonicalHeaders: [],
+      rows: [],
+      errors: ['No recognized Positions CSV columns'],
+      headerLineNumber: null,
+      kind: 'positions'
+    };
+  }
+
+  const rawHeaders = parseCsvLine(lines[headerIndex]).map((h) => h.trim());
+  const canonicalHeaders = rawHeaders.map((h) => mapHeader(h));
+  const errors = [];
+  const rows = [];
+  let accepted = false;
+  let stoppedAtFooter = false;
+
+  for (let i = headerIndex + 1; i < lines.length; i += 1) {
+    if (lines[i].trim() === '') {
+      if (accepted) {
+        stoppedAtFooter = true;
+        break;
+      }
+      continue;
+    }
+    if (isFooterProseText(lines[i])) {
+      stoppedAtFooter = true;
+      break;
+    }
+
+    const cells = parseCsvLine(lines[i]);
+    const raw = {};
+    const record = {};
+    rawHeaders.forEach((header, idx) => {
+      const value = cells[idx] == null ? '' : String(cells[idx]).trim();
+      raw[header] = value;
+      const canonical = canonicalHeaders[idx];
+      if (canonical) record[canonical] = value;
+    });
+    rows.push({
+      lineNumber: i + 1,
+      raw,
+      record
+    });
+    accepted = true;
+  }
+
+  return {
+    headers: rawHeaders,
+    canonicalHeaders,
+    rows,
+    errors,
+    headerLineNumber: headerIndex + 1,
+    stoppedAtFooter,
+    kind: 'positions'
+  };
+}
+
+export function parseBrokerageCsv(text) {
+  const activity = parseActivityCsv(text);
+  if (activity.headerLineNumber != null && !activity.errors.includes('No recognized Activity CSV columns')) {
+    return activity;
+  }
+  const positions = parsePositionsCsv(text);
+  if (positions.headerLineNumber != null && !positions.errors.includes('No recognized Positions CSV columns')) {
+    return positions;
+  }
+  return {
+    headers: activity.headers || [],
+    canonicalHeaders: [],
+    rows: [],
+    errors: ['No recognized Activity or Positions CSV columns'],
+    headerLineNumber: null,
+    kind: null
   };
 }
 
@@ -288,6 +432,37 @@ export function buildEtradePreambleCsv(rows, options = {}) {
     `Account Activity for ${accountLabel} from ${from} to ${to}`,
     '',
     `Total:,${total}`,
+    '',
+    body
+  ];
+  if (options.footer) {
+    const footerLines = Array.isArray(options.footer) ? options.footer : ETRADE_SYNTHETIC_FOOTER;
+    if (options.footerGap !== false) parts.push('');
+    parts.push(...footerLines);
+  }
+  return parts.join('\n');
+}
+
+export const ETRADE_POSITIONS_COLUMNS = [
+  'Symbol',
+  'Quantity',
+  'Last Price $',
+  'Cost Basis $',
+  'Average Cost $',
+  'Market Value $'
+];
+
+/**
+ * Synthetic E*TRADE Positions snapshot. Price/Last Price is mark, not cost.
+ * Never include real account numbers or brokerage symbols.
+ */
+export function buildEtradePositionsCsv(rows, options = {}) {
+  const accountLabel = options.accountLabel || 'Synthetic Account -0000';
+  const body = buildSyntheticCsv(rows, options.headers || ETRADE_POSITIONS_COLUMNS);
+  const parts = [
+    'Account Positions',
+    '',
+    `Positions for ${accountLabel}`,
     '',
     body
   ];
