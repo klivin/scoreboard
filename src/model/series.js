@@ -9,10 +9,65 @@ import {
 } from './overlays.js';
 import { applySeriesStoreToPack, overlayByTimestamp } from './ingest-store.js';
 import { ingestSeriesStore, ingestWatermarkStore, universeStore } from './store-adapter.js';
+import { normalizeTicker } from './ticker.js';
 
-function isBtcSymbol(symbol) {
+export function isBtcSymbol(symbol) {
   const upper = String(symbol || '').toUpperCase();
   return upper === 'BTC' || upper === 'BTCUSDT';
+}
+
+function finiteOr(value, fallback) {
+  return Number.isFinite(value) ? value : fallback;
+}
+
+export function candleRowsForSymbol(rows, symbol) {
+  const upper = String(symbol || '').toUpperCase();
+  const labeled = [];
+  const unlabeled = [];
+  for (const row of rows || []) {
+    if (!row) continue;
+    if (row.symbol) {
+      if (String(row.symbol).toUpperCase() === upper) labeled.push(row);
+    } else {
+      unlabeled.push(row);
+    }
+  }
+  if (isBtcSymbol(upper)) return unlabeled.concat(labeled);
+  return labeled;
+}
+
+export function mergePackAndIngestRows(packRows, ingestRows) {
+  const pack = packRows || [];
+  const ingest = ingestRows || [];
+  if (!ingest.length) return pack.slice();
+  if (!pack.length) return ingest.slice();
+  const map = new Map();
+  for (const row of pack) {
+    if (!row || !Number.isFinite(row.timestamp)) continue;
+    map.set(row.timestamp, { ...row });
+  }
+  for (const row of ingest) {
+    if (!row || !Number.isFinite(row.timestamp)) continue;
+    const existing = map.get(row.timestamp);
+    if (!existing) {
+      map.set(row.timestamp, { ...row });
+      continue;
+    }
+    map.set(row.timestamp, {
+      ...existing,
+      ...row,
+      ma20: finiteOr(row.ma20, existing.ma20),
+      ma50: finiteOr(row.ma50, existing.ma50),
+      ma100: finiteOr(row.ma100, existing.ma100),
+      ma200: finiteOr(row.ma200, existing.ma200),
+      tenkan: finiteOr(row.tenkan, existing.tenkan),
+      kijun: finiteOr(row.kijun, existing.kijun),
+      senkouA: finiteOr(row.senkouA, existing.senkouA),
+      senkouB: finiteOr(row.senkouB, existing.senkouB),
+      chikou: finiteOr(row.chikou, existing.chikou)
+    });
+  }
+  return [...map.values()].sort((a, b) => a.timestamp - b.timestamp);
 }
 
 function numeric(...values) {
@@ -31,16 +86,19 @@ export function filterRowsBySymbol(rows, symbol) {
   ));
 }
 
-export function missingSeriesMessage(symbol, interval) {
+export function missingSeriesMessage(symbol, interval, extra = {}) {
   const intervalNorm = interval === '1h' ? '1h' : '1d';
   const sym = String(symbol || '').toUpperCase();
+  if (extra.assetClass === 'stock' || extra.needsStockAdapter) {
+    return `No data available for ${sym} ${intervalNorm}. Stocks need a configured adapter — no no-key public equity candle source is wired. Prices are not invented.`;
+  }
   if (intervalNorm === '1h' && !isBtcSymbol(sym)) {
-    return `No 1h series for ${sym}. Hourly OKX candles are ingested for BTC and ETH on Load Data; the Flow pack only includes hourly OKX BTC (okx_btc_usdt_swap_candles_1h.csv). Alt 1h is not interpolated from indicators_daily.csv. Missing readings are not plotted as 0.`;
+    return `No 1h series for ${sym}. Load Data fetches OKX public ${sym}-USDT-SWAP (or spot) candles incrementally. The Flow pack only includes hourly OKX BTC (okx_btc_usdt_swap_candles_1h.csv). Alt 1h is not interpolated from daily. Missing readings are not plotted as 0.`;
   }
   if (intervalNorm === '1h' && isBtcSymbol(sym)) {
     return `No 1h series for BTC. Place okx_btc_usdt_swap_candles_1h.csv in /workspace/scoreboard/ or ./data/.`;
   }
-  return `No data available for ${sym} ${intervalNorm}`;
+  return `No data available for ${sym} ${intervalNorm}. Crypto Load Data uses OKX public ${sym}-USDT-SWAP or ${sym}-USDT candles. Stocks need a configured adapter (none is wired; prices are not invented).`;
 }
 
 export function mapIndicatorRow(row) {
@@ -231,16 +289,13 @@ export class SeriesModel {
   }
 
   getBtcCandles(interval) {
+    return this.getCandlesForSymbol('BTC', interval);
+  }
+
+  getCandlesForSymbol(symbol, interval) {
     const candleKey = interval === '1h' ? 'candles_1h' : 'candles_1d';
     const candles = this.data[candleKey] && this.data[candleKey].data ? this.data[candleKey].data : [];
-    return candles
-      .filter((row) => {
-        if (!row) return false;
-        if (row.symbol == null || row.symbol === '') return true;
-        return isBtcSymbol(row.symbol);
-      })
-      .map(normalizeCandleRow)
-      .filter((row) => row && row.timestamp);
+    return candleRowsForSymbol(candles, symbol).map(normalizeCandleRow).filter((row) => row && row.timestamp);
   }
 
   getLiveCandles(symbol, interval) {
@@ -278,13 +333,15 @@ export class SeriesModel {
     }
 
     if (!series || series.length === 0) {
-      throw new Error(missingSeriesMessage(symbol, intervalNorm));
+      throw new Error(missingSeriesMessage(symbol, intervalNorm, {
+        assetClass: normalizeTicker(symbol).assetClass
+      }));
     }
 
     const ranged = applyRangeAndFields(series, from, to, null, sinceExclusive);
     const withOverlays = attachFlowOverlays(ranged, {
       etfRows: this.getEtfRows(symbol),
-      oiRows: isBtcSymbol(symbol) ? this.getOiRows(intervalNorm) : [],
+      oiRows: this.getOiRows(intervalNorm, symbol),
       interval: intervalNorm
     });
     return applyRangeAndFields(withOverlays, null, null, fields, sinceExclusive);
@@ -313,11 +370,18 @@ export class SeriesModel {
       }
     }
 
-    const hasBtcCandles = (
-      (this.data.candles_1h && this.data.candles_1h.data && this.data.candles_1h.data.length > 0) ||
-      (this.data.candles_1d && this.data.candles_1d.data && this.data.candles_1d.data.length > 0)
-    );
-    if (hasBtcCandles) symbols.add('BTC');
+    for (const key of ['candles_1h', 'candles_1d']) {
+      const rows = this.data[key] && this.data[key].data ? this.data[key].data : [];
+      let unlabeled = false;
+      for (const row of rows) {
+        if (row && row.symbol) {
+          symbols.add(String(row.symbol).toUpperCase());
+        } else if (row) {
+          unlabeled = true;
+        }
+      }
+      if (unlabeled) symbols.add('BTC');
+    }
 
     for (const row of this.data.live_candles || []) {
       if (row && row.symbol) {
@@ -337,15 +401,16 @@ export class SeriesModel {
     return pack && pack.data && pack.data.length ? pack.data : [];
   }
 
-  getOiRows(interval = '1d') {
+  getOiRows(interval = '1d', symbol = 'BTC') {
     this.ensureLoaded();
     const swapKey = interval === '1h' ? 'oi_swap_1h' : 'oi_swap_1d';
     const joinedKey = interval === '1h' ? 'oi_1h' : 'oi_1d';
     const primary = this.data[swapKey];
-    if (primary && primary.data && primary.data.length) return primary.data;
     const fallback = this.data[joinedKey];
-    if (fallback && fallback.data && fallback.data.length) return fallback.data;
-    return [];
+    const raw = (primary && primary.data && primary.data.length)
+      ? primary.data
+      : ((fallback && fallback.data && fallback.data.length) ? fallback.data : []);
+    return candleRowsForSymbol(raw, symbol);
   }
 
   getSignals(symbol) {
@@ -364,7 +429,7 @@ export class SeriesModel {
       };
     }
 
-    const oiRows = isBtcSymbol(symbolUpper) ? this.getOiRows('1d') : [];
+    const oiRows = this.getOiRows('1d', symbolUpper);
     if (oiRows.length > 0) {
       const latest = oiRows[oiRows.length - 1];
       const weekAgo = oiRows[Math.max(0, oiRows.length - 8)];

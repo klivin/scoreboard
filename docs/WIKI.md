@@ -26,7 +26,7 @@ Scoreboard is a crypto market analysis and forecasting dashboard built with vani
 - `signals/` - Extensible signal engine (EMA, MACD, RSI recovery, Ichimoku) + consensus
 - `backtest.js` - Walk-forward backtest vs buy-and-hold and naive baseline
 - `ingest.js` - Pack-file parsers (CSV/JSON on disk). No network.
-- `okx-adapter.js` / `fallback-adapters.js` / `refresh.js` - Incremental ingest (OKX live; ETF/CG fallback)
+- `okx-adapter.js` / `fallback-adapters.js` / `stock-adapter.js` / `ticker.js` / `refresh.js` - Incremental ingest (OKX any crypto ticker; stocks unconfigured; ETF/CG fallback)
 - `store.js` - Local JSON storage (forecasts, errors, universe, ingest_watermarks, ingest_series)
 - `store-adapter.js` - Abstraction layer for local/Firestore backends
 
@@ -112,18 +112,20 @@ No API keys in client JS. OKX public endpoints need none. Keyed sources are out 
 | Source | Adapter id | Mode | What it does |
 |---|---|---|---|
 | OKX BTC-USDT-SWAP candles | `okx-candles` BTC (`1h`, `1d`) | **incremental** | Live `GET https://www.okx.com/api/v5/market/history-candles?instId=BTC-USDT-SWAP&bar=1H\|1D`. Second refresh sends `before=<watermark - 3 bars>` so it only requests the delta (plus overlap). Public, no key. |
-| OKX ETH-USDT-SWAP candles | `okx-candles` ETH (`1h`, `1d`) | **incremental** | Same public candles endpoint with `instId=ETH-USDT-SWAP`. Own watermark `okx-candles:ETH:1h` / `okx-candles:ETH:1d`. Second refresh sends `before=` for that symbol+interval only. Public, no key. |
-| OKX BTC-USDT-SWAP OI | `okx-oi` (`1h`, `1d`) | **incremental** | Live `GET https://www.okx.com/api/v5/rubik/stat/contracts/open-interest-history?instId=BTC-USDT-SWAP&period=1H\|1D` with `begin=` when a cursor exists. `/api/v5/public/open-interest-history` is **404** (verified). Public, no key. |
+| OKX ETH-USDT-SWAP candles | `okx-candles` ETH (`1h`, `1d`) | **incremental** | Same public candles endpoint with `instId=ETH-USDT-SWAP`. Own watermark `okx-candles:ETH:1h` / `okx-candles:ETH:1d`. Second refresh sends `before=` for that symbol+interval only. Public, no key. ETH is in `defaultAdapters` so Load Data without a ticker still refreshes it. |
+| OKX `{SYM}-USDT-SWAP` / `{SYM}-USDT` candles | `okx-candles` (`1h`, `1d`, any crypto ticker) | **incremental** | Same public `history-candles` path for tickers typed in Overview. Default instId is `{SYM}-USDT-SWAP`. If OKX returns instrument-missing (`51001`), retry `{SYM}-USDT` spot. Watermark key is `(okx-candles, SYM, interval)` — a later Load Data only requests the overlap-adjusted tail. |
+| OKX BTC-USDT-SWAP OI | `okx-oi` (`1h`, `1d`) | **incremental** | Live `GET https://www.okx.com/api/v5/rubik/stat/contracts/open-interest-history?instId=BTC-USDT-SWAP&period=1H\|1D` with `begin=` when a cursor exists. `/api/v5/public/open-interest-history` is **404** (verified). Public, no key. ETH swap OI uses the same path when ETH is loaded. |
 | ETF net flows (Farside) | `etf-farside` (BTC, ETH) | **bounded-overlap fallback** | `fetchSince` **ignores** the cursor. Re-fetches/re-parses the whole small HTML table (or the pack CSV if Cloudflare/HTML fails), then dedupes by date. `nextCursor` is always `null`. Not claimed as incremental. |
 | CoinGecko top100 | `coingecko-top100` | **bounded-overlap fallback** | `fetchSince` **ignores** the cursor. Re-fetches the whole top100 markets page. On **429**, re-parses `cg_top100_universe.json`. Categories stay blank when missing. `nextCursor` is always `null`. Not claimed as incremental. |
+| Stocks | `stock-public` (`1h`, `1d`) | **unconfigured** | Interface only. No no-key public equity candle source is wired in this repo. `fetchSince` returns **zero rows** and `needsAdapter: true`. Never invents prices. |
 
-Do not invent series. Multi-exchange OI and alt hourly candles (SOL, etc.) are still absent. ETH 1h/1d live candles come from OKX ingest after Load Data, not from interpolating the pack.
+Do not invent series. Multi-exchange OI is still absent. ETH 1h/1d live candles come from OKX ingest after Load Data (ETH is in `defaultAdapters`), not from interpolating the pack. Alt 1h that OKX lists (SOL, etc.) can be ingested after Add / Load; alts that OKX does not list stay missing (not interpolated, not zero-filled).
 
 ### Series preference (live ingest vs pack indicators)
 
 Daily charts used to prefer `indicators_daily.csv` and only fall back to OKX candles when that file was empty. That left BTC/ETH 1d stuck on a stagnant pack date (~Aug 31) even when `ingest_series` already had a live `okx-candles` 1d watermark (~Sept 10).
 
-`getSeries(symbol, '1d')` now **merges** pack indicator rows with live `okx-candles` (plus BTC pack candle CSVs) **by calendar date**:
+`getSeries(symbol, '1d')` now **merges** pack indicator rows with live `okx-candles` (plus BTC pack candle CSVs) **by calendar date** (`mergeDailyPreferLive`):
 
 - Overlapping dates: live OKX OHLC wins. Pack MA/Ichimoku columns are kept when the live row does not carry them.
 - Live-only dates (the missing daily tail) are appended. Pack-only older days with a finite close stay.
@@ -131,7 +133,65 @@ Daily charts used to prefer `indicators_daily.csv` and only fall back to OKX can
 - Missing calendar days stay missing. No invented bars, no zero-fill.
 - Hourly is candles-only (never interpolated from daily). BTC 1h still reads the OKX 1h pack/ingest overlay. ETH 1h reads live ingest after Load Data; if ingest is empty the on-page missing message still fires. ETH 1d ingest is 0 until Load Data runs the ETH OKX adapters.
 
-ETH ingest is **not** written onto the BTC pack candle files (`okx_btc_usdt_swap_candles_*.csv`). Those overlays stay BTC-only so equal timestamps cannot clobber BTC. ETH rows live on `pack.live_candles` / `ingest_series` filtered by symbol.
+ETH (and other alt) ingest is **not** written onto the BTC pack candle files (`okx_btc_usdt_swap_candles_*.csv`). Those overlays stay BTC-only so equal timestamps cannot clobber BTC. Non-BTC rows live on `pack.live_candles` / `ingest_series` filtered by symbol. Overlay keys are `symbol|timestamp` so same-clock BTC/ETH/SOL rows coexist.
+
+---
+
+## Arbitrary tickers (Overview text field)
+
+**Status:** doing. Research / paper only. No brokerage keys. Not Pooli.
+
+The Overview **combo box is replaced** by a ticker text field + **Add / Load**. The user can type any crypto or stock (`ETH`, `SOL`, `AAPL`, `ETH-USDT-SWAP`). Interval still has `1h` / `1d`. Load Data refreshes **both** hourly and daily for that ticker, then charts the selected interval on the same Lightweight Charts path as BTC/ETH.
+
+Chat tap-to-load (`AppController.loadAsset` / `public/js/load-asset.js`) writes `#ticker-input` and calls `setSelectedSymbol` when present, then the same `reloadSelected()` path. Do not add a second OKX watermark ingest in the Chat seam.
+
+```
+type/add ticker
+  → normalizeTicker (uppercase, strip $, BTCUSDT / BTC-USDT-SWAP → BTC)
+  → classify: known crypto | known stock | unknown (try OKX)
+  → POST /api/refresh?symbol=SYM   // creates adapters if needed; 1h + 1d
+  → upsert ingest_series + ingest_watermarks (source, symbol, interval)
+  → GET /api/indicators?symbol=SYM&interval=
+  → ChartView (same overlays; missing ETF/OI stay missing)
+```
+
+**Normalize** (`src/model/ticker.js`, mirrored in `public/js/ticker.js`):
+
+| Input | Symbol | Class | OKX instIds tried |
+|---|---|---|---|
+| `eth` / `ETH` | ETH | crypto | `ETH-USDT-SWAP`, then `ETH-USDT` |
+| `SOL-USDT` | SOL | crypto | spot first (hint), then swap already recorded |
+| `BTCUSDT` | BTC | crypto | `BTC-USDT-SWAP`, `BTC-USDT` |
+| `AAPL` / `AAPL.US` | AAPL | stock | none — stock adapter |
+| empty / junk | `''` | — | error, no fetch |
+
+Unknown tickers (not in the small known-stock list) **attempt OKX**. If the instrument does not exist, refresh errors and the chart says missing — we do not invent a series.
+
+**Cache / increment**
+
+- Natural key and watermark stay `(source, symbol, interval)` — `okx-candles:SOL:1h`.
+- First load: recent OKX pages (no `before=`). Rows upserted; watermark advances only after the whole page succeeds.
+- Second Load Data: `before=<lastTimestamp − 3 bars>` (same overlap as BTC). Never a full re-download when a watermark exists.
+- Failed HTTP leaves the previous watermark in place.
+
+**Series merge (do not break BTC/ETH)**
+
+- Pack OKX candle/OI CSVs often have **no `symbol` column**. Unlabeled pack rows are **BTC only**.
+- Ingest rows always carry `symbol`. `getSeries` / `getLiveCandles` filter labeled rows by ticker so ETH/SOL ingest cannot land on the BTC chart.
+- Daily: `mergeDailyPreferLive` — pack `indicators_daily.csv` (MAs / Ichimoku) merges with live ingest daily OHLC by calendar date. Live OKX OHLC wins; pack indicator columns are kept when ingest does not provide them. Live-only dates append. Pack-only null-close tails are dropped.
+- Hourly: `getLiveCandles` (BTC pack overlay + `live_candles` / ingest). Daily is never interpolated into 1h.
+
+**Stocks — documented gap**
+
+There is **no** in-repo no-key stock candle API (no Alpha Vantage / Polygon / Finnhub keys; Yahoo/Stooq are not wired and are not treated as a blessed public source). `src/model/stock-adapter.js` implements the same `{ id, symbol, interval, mode, fetchSince }` shape and returns `{ rows: [], needsAdapter: true, note }`. The UI shows that stocks need a configured adapter. **Do not invent equity OHLC. Do not commit a fake AAPL series.**
+
+**UI**
+
+- `#ticker-input` + `#ticker-add-btn` (Enter also loads)
+- Optional recent chips (`localStorage` `scoreboard.recentTickers`, max 8)
+- Hidden `#symbol-select` stays in sync so Universe row-click, Forecasts jump, and Chat tap-to-load still set the Overview ticker
+
+**Files:** `src/model/ticker.js`, `src/model/stock-adapter.js`, `src/model/okx-adapter.js` (per-symbol instId), `src/model/refresh.js` (`adaptersForTicker` / `ensureSymbolAdapters`), `src/model/series.js` (symbol-filtered candles + `mergeDailyPreferLive`), `public/js/ticker.js`, `public/js/controller.js`, `public/js/load-asset.js`
 
 ### Source Priority (pack seed)
 
@@ -479,7 +539,7 @@ src/controller/api.js             # GET /api/scanner
 public/js/scanner/                # Universe tab view + controller
 ```
 
-Clicking a scanner row sets `#symbol-select` and opens Overview (same `updateOverview` path as the dropdown).
+Clicking a scanner row sets `#ticker-input` (and hidden `#symbol-select`) and opens Overview (same `updateOverview` path as Add / Load).
 
 ---
 
@@ -520,7 +580,7 @@ The server **strips** any `asset_card` that does not match a successful `resolve
 
 `AppController.loadAsset({ symbol, assetClass, intervalHint })` (`public/js/load-asset.js`):
 
-1. Write the symbol onto `#symbol-select` (and `#ticker-input` when PR #14 lands)
+1. Write the symbol onto `#symbol-select` and `#ticker-input` (`setSelectedSymbol` when present)
 2. Set `#interval-select` from `intervalHint` (`1d` default; `1h` when the card asked for hourly)
 3. Switch to Overview
 4. Call existing **Load Data** `reloadSelected()` (`POST /api/refresh` then `GET /api/indicators`)
@@ -790,9 +850,16 @@ All endpoints support symbol parameter for multi-asset queries. Returns JSON by 
 
 ### Hourly Data Limited (verified hypothesis)
 - **1h pack file that exists:** BTC only, from `okx_btc_usdt_swap_candles_1h.csv` (~1700 bars, columns `ts_ms`, `datetime_utc`, ohlcv) plus optional joined OI.
-- **1h live ingest:** BTC and ETH from public OKX `history-candles` (`BTC-USDT-SWAP` / `ETH-USDT-SWAP`) after Load Data. Other alts have no 1h adapter.
-- **1h that still does not exist:** SOL and other alts. Overlay / repo CSVs for alts are `indicators_daily.csv` (daily). There is no ETH 1h pack file — ETH 1h is live ingest only.
-- **Required behavior:** BTC 1h charts from the OKX 1h file plus ingest overlay. ETH 1h charts from live ingest after Load Data; if ingest is empty, on-page missing message. Do not interpolate daily into 1h. Do not plot zeros.
+- **1h live ingest (default adapters):** BTC and ETH from public OKX `history-candles` (`BTC-USDT-SWAP` / `ETH-USDT-SWAP`) after Load Data.
+- **1h via typed ticker:** any ticker OKX lists as `{SYM}-USDT-SWAP` or `{SYM}-USDT` (SOL, …) after Add / Load. Cached in `ingest_series` with a per-symbol watermark.
+- **1h that still does not exist:** symbols OKX does not list; all stocks (no equity adapter). Overlay / repo CSVs for alts are `indicators_daily.csv` (daily). There is no ETH 1h pack file — ETH 1h is live ingest only.
+- **Required behavior:** BTC 1h charts from the OKX 1h file plus ingest overlay. ETH 1h charts from live ingest after Load Data; if ingest is empty, on-page missing message. Other 1h comes from ingest only. Do not interpolate daily into 1h. Do not plot zeros.
+- **Impact:** 1h interval selector has pack rows for BTC; other symbols need a successful OKX refresh.
+
+### Stocks have no public no-key adapter
+- **Issue:** Equities are not in the Flow pack. No in-repo stock API can be called without keys.
+- **Behavior:** `stock-public` adapter returns zero rows and `needsAdapter`. UI says missing. Prices are never invented.
+- **Impact:** Typing `AAPL` attempts load and fails honestly until a keyed/configured adapter is added (out of scope; no keys).
 
 ### Historical Depth
 - **Pack scope:** Dataset time range determined by Flow pack
@@ -893,6 +960,9 @@ scoreboard/
 │   │   ├── signals/
 │   │   ├── indicators.js
 │   │   ├── ingest.js
+│   │   ├── ticker.js
+│   │   ├── stock-adapter.js
+│   │   ├── okx-adapter.js
 │   │   ├── series.js
 │   │   ├── chat/          # Chat tools, stub, live provider
 │   │   ├── store.js
@@ -1029,7 +1099,15 @@ scoreboard.investments
 - Cards only from successful resolve; tap → `loadAsset` → Overview Load Data (`reloadSelected`)
 - Live OpenAI-compatible function calling if a server key exists; otherwise deterministic stub
 - Localhost (2026-09-11): stub path verified — buyback cards, tap BNB sets Overview symbol, unknown ticker has no card
-- Status: **doing** — no keys in repo; PR #14 ticker field not required
+- Status: **doing** — no keys in repo; PR #14 ticker field is present (`#ticker-input` + `setSelectedSymbol`)
+
+### Ticker text field (any crypto / stock)
+- Overview combo box replaced by ticker text input + Add / Load + optional recent chips
+- Crypto: OKX public swap then spot candles, hourly + daily, watermark per (source, symbol, interval)
+- Stocks: `stock-public` adapter interface only — missing / needs configured adapter; no invented prices
+- Series filter keeps unlabeled pack candles as BTC; ingest cannot cross-plot onto another symbol
+- Chat tap-to-load syncs `#ticker-input` via `setSelectedSymbol` / `load-asset.js`
+- Status: **doing**
 
 ### Forecasts tab (scored history, second product slice)
 - Forecasts tab lists walk-forward scored records: symbol, horizon, as-of, predicted range/point, confidence, model/version, actual, MAE vs naive, status
@@ -1122,7 +1200,5 @@ scoreboard.investments
 ---
 
 **Last Updated:** 2026-09-11  
-**Version:** v1.7 (daily live ingest preference + ETH OKX candles)
-
-**Version:** v1.7 (Chat pane + live daily merge)  
-**Status:** Not Pooli. No keys client-side. No trades. Research/NFA chat.
+**Version:** v1.8 (Chat pane + ticker field + live daily merge)  
+**Status:** Not Pooli. No keys client-side. No trades. Research/NFA chat. Import stays in-browser.

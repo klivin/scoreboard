@@ -259,8 +259,30 @@ npm start
 
 ## Data Features
 
+### Ticker text field (any crypto / stock)
+**Status:** doing  
+**Request:** Replace the Overview asset combo box with a ticker text field. User types/adds any crypto or stock (`ETH`, `SOL`, `AAPL`, …), then Load Data fetches daily + hourly and charts them on the same Lightweight Charts path as BTC/ETH. Cache each asset. A later pull fetches only the latest increment (OKX watermark + overlap), not a full re-download.
+
+**Must ship:**
+1. Text input + Add/Load (optional short recent/favorites list). Entering a ticker attempts load. Keep `#symbol-select` as a hidden sync for scanner/forecast jump.
+2. Crypto: OKX public `history-candles` for `{SYM}-USDT-SWAP`, falling back to `{SYM}-USDT` spot when the swap instrument does not exist. Persist `ingest_series` + `ingest_watermarks` per `(source, symbol, interval)` for `1h` and `1d`. Second Load Data sends `before=<watermark − 3 bars>`.
+3. Stocks: no in-repo no-key equity API. Ship the adapter interface (`stock-public`) and an honest “stocks need a configured adapter / missing” path. **Do not invent prices. Do not hardcode fake equity series.**
+4. Charting: same overlays as BTC/ETH for that series. Missing ETF/OI/Ichimoku-from-pack say **missing**.
+5. Do not break BTC/ETH pack charts: unlabeled pack candles/OI stay BTC; ingest rows are filtered by symbol; pack daily indicators merge with ingest OHLC (pack MAs/Ichimoku kept when ingest lacks them).
+
+**Verification:**
+- `npm test` — ticker normalize; mocked HTTP incremental ETH/SOL fetch; stock adapter returns 0 rows + needs-adapter note; ETH ingest 1h does not pollute BTC
+- Localhost: type `ETH` / `SOL` → Add/Load → candles + increment on second Load Data; `AAPL` → honest missing (no fake prices)
+- BTC 1d / ETH 1d pack path still plots the correct asset
+
+**Design:** `docs/WIKI.md` (Arbitrary tickers)
+
+**Priority:** High
+
+---
+
 ### ✅ Custom Tickers
-**Status:** done (12 symbols supported)  
+**Status:** done (12 symbols supported; dropdown replaced by ticker field — see above)  
 **Request:** Symbol selector for different assets  
 **Symbols Supported:**
 - ✅ AVAX

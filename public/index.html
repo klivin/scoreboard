@@ -25,23 +25,12 @@
 
     <div id="overview" class="tab-content active">
       <div class="controls">
-        <label>
-          Symbol:
-          <select id="symbol-select">
-            <option value="AVAX">AVAX</option>
-            <option value="BNB">BNB</option>
-            <option value="BTC" selected>BTC</option>
-            <option value="DOGE">DOGE</option>
-            <option value="ETH">ETH</option>
-            <option value="LINK">LINK</option>
-            <option value="PEPE">PEPE</option>
-            <option value="SHIB">SHIB</option>
-            <option value="SOL">SOL</option>
-            <option value="SUI">SUI</option>
-            <option value="TRUMP">TRUMP</option>
-            <option value="XRP">XRP</option>
-          </select>
+        <label class="ticker-field">
+          Ticker:
+          <input id="ticker-input" type="text" value="BTC" placeholder="ETH, SOL, AAPL…" autocomplete="off" spellcheck="false" />
+          <button type="button" id="ticker-add-btn">Add / Load</button>
         </label>
+        <input type="hidden" id="symbol-select" value="BTC" />
         <label>
           Interval:
           <select id="interval-select">
@@ -52,6 +41,8 @@
         <button id="load-btn">Load Data</button>
         <button id="download-csv-btn">Download CSV</button>
       </div>
+      <div id="ticker-recent" class="ticker-recent" aria-label="Recent tickers"></div>
+      <p class="ticker-hint">Type a crypto (OKX public swap/spot) or stock ticker. Stocks need a configured adapter — prices are never invented.</p>
       <div id="refresh-status" class="refresh-status hidden" aria-live="polite"></div>
 
       <div id="chart-container">

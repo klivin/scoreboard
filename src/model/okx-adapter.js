@@ -1,5 +1,6 @@
 import { httpGet, parseJsonBody } from './http.js';
 import { intervalMs } from './source-adapter.js';
+import { instIdCandidates, normalizeTicker, resolveOkxInstId } from './ticker.js';
 
 export const OKX_BASE = 'https://www.okx.com';
 export const OKX_CANDLES_PATH = '/api/v5/market/history-candles';
@@ -8,9 +9,12 @@ export const OKX_INST_ID = 'BTC-USDT-SWAP';
 export const OKX_ETH_INST_ID = 'ETH-USDT-SWAP';
 
 export function okxInstId(symbol) {
-  const upper = String(symbol || 'BTC').toUpperCase();
-  if (upper === 'ETH' || upper === 'ETHUSDT') return OKX_ETH_INST_ID;
-  return OKX_INST_ID;
+  return resolveOkxInstId(symbol);
+}
+
+export function isOkxInstrumentError(error) {
+  const msg = error && error.message ? error.message : String(error || '');
+  return /51001|Instrument ID|does not exist|doesn't exist/i.test(msg);
 }
 
 const BAR = { '1h': '1H', '1d': '1D' };
@@ -103,7 +107,7 @@ export function normalizeOkxOi(raw, { symbol, interval, source = 'okx-oi' } = {}
     date_utc: dateUtc(ts),
     oi: numeric(Array.isArray(raw) ? raw[1] : (raw.oi || raw.open_interest)),
     oi_ccy: numeric(Array.isArray(raw) ? raw[2] : raw.oiCcy),
-    instId: OKX_INST_ID
+    instId: raw && !Array.isArray(raw) && raw.instId ? raw.instId : (symbol ? resolveOkxInstId(symbol) : OKX_INST_ID)
   };
 }
 
@@ -117,55 +121,100 @@ async function readOkxPage(http, url) {
   return { data: Array.isArray(body.data) ? body.data : [], url };
 }
 
+async function fetchOkxCandlePages({
+  instId,
+  interval,
+  since,
+  limit,
+  maxPages,
+  http,
+  symbol
+}) {
+  const requestUrls = [];
+  const raw = [];
+  let after = null;
+
+  for (let page = 0; page < maxPages; page++) {
+    const url = buildOkxCandlesUrl({
+      interval,
+      since: after == null ? since : null,
+      after,
+      limit,
+      instId
+    });
+    requestUrls.push(url);
+    const { data } = await readOkxPage(http, url);
+    if (!data.length) break;
+    raw.push(...data);
+    const oldest = numeric(data[data.length - 1] && data[data.length - 1][0]);
+    if (data.length < limit) break;
+    if (since != null && Number.isFinite(oldest) && oldest <= since) break;
+    after = oldest;
+  }
+
+  const rows = raw
+    .map((item) => normalizeOkxCandle(item, { symbol, interval }))
+    .filter((row) => row && (since == null || row.timestamp >= since));
+
+  const nextTs = rows.reduce((max, row) => (row.timestamp > max ? row.timestamp : max), since);
+  return {
+    rows,
+    nextCursor: nextTs != null ? { lastTimestamp: nextTs } : null,
+    requestUrls,
+    requestedSince: since,
+    instId
+  };
+}
+
 export function createOkxCandleAdapter({
   symbol = 'BTC',
   interval = '1d',
+  instId = null,
+  market = 'swap',
+  trySpotFallback = true,
   httpGet: http = httpGet,
   limit = DEFAULT_LIMIT,
   maxPages = MAX_PAGES
 } = {}) {
-  const instId = okxInstId(symbol);
+  const parsed = normalizeTicker(symbol);
+  const upper = parsed.symbol || String(symbol || 'BTC').toUpperCase();
+  const primaryInst = instId || okxInstId(upper);
+
   return {
     id: 'okx-candles',
-    symbol,
+    symbol: upper,
     interval,
     mode: 'incremental',
-    instId,
+    instId: primaryInst,
     async fetchSince(cursor) {
       const since = cursor && cursor.since != null ? cursor.since : null;
-      const requestUrls = [];
-      const raw = [];
-      let after = null;
+      const locked = Boolean(instId);
+      const candidates = locked
+        ? [{ market, instId: primaryInst }]
+        : (instIdCandidates(parsed).length
+          ? instIdCandidates(parsed)
+          : [{ market, instId: primaryInst }]);
 
-      for (let page = 0; page < maxPages; page++) {
-        const url = buildOkxCandlesUrl({
-          interval,
-          since: after == null ? since : null,
-          after,
-          limit,
-          instId
-        });
-        requestUrls.push(url);
-        const { data } = await readOkxPage(http, url);
-        if (!data.length) break;
-        raw.push(...data);
-        const oldest = numeric(data[data.length - 1] && data[data.length - 1][0]);
-        if (data.length < limit) break;
-        if (since != null && Number.isFinite(oldest) && oldest <= since) break;
-        after = oldest;
+      let lastError = null;
+      for (let i = 0; i < candidates.length; i++) {
+        const candidate = candidates[i];
+        try {
+          return await fetchOkxCandlePages({
+            instId: candidate.instId,
+            interval,
+            since,
+            limit,
+            maxPages,
+            http,
+            symbol: upper
+          });
+        } catch (error) {
+          lastError = error;
+          const canFallback = trySpotFallback && !locked && i < candidates.length - 1 && isOkxInstrumentError(error);
+          if (!canFallback) throw error;
+        }
       }
-
-      const rows = raw
-        .map((item) => normalizeOkxCandle(item, { symbol, interval }))
-        .filter((row) => row && (since == null || row.timestamp >= since));
-
-      const nextTs = rows.reduce((max, row) => (row.timestamp > max ? row.timestamp : max), since);
-      return {
-        rows,
-        nextCursor: nextTs != null ? { lastTimestamp: nextTs } : null,
-        requestUrls,
-        requestedSince: since
-      };
+      throw lastError || new Error(`OKX candles failed for ${upper}`);
     }
   };
 }
@@ -173,21 +222,28 @@ export function createOkxCandleAdapter({
 export function createOkxOiAdapter({
   symbol = 'BTC',
   interval = '1d',
+  instId = null,
   httpGet: http = httpGet,
   limit = DEFAULT_LIMIT
 } = {}) {
+  const parsed = normalizeTicker(symbol);
+  const upper = parsed.symbol || String(symbol || 'BTC').toUpperCase();
+  const resolvedInst = instId || resolveOkxInstId(upper);
+
   return {
     id: 'okx-oi',
-    symbol,
+    symbol: upper,
     interval,
     mode: 'incremental',
+    instId: resolvedInst,
     async fetchSince(cursor) {
       const since = cursor && cursor.since != null ? cursor.since : null;
-      const url = buildOkxOiUrl({ interval, since, limit });
+      const url = buildOkxOiUrl({ interval, since, limit, instId: resolvedInst });
       const { data } = await readOkxPage(http, url);
       const rows = data
-        .map((item) => normalizeOkxOi(item, { symbol, interval }))
-        .filter((row) => row && (since == null || row.timestamp >= since));
+        .map((item) => normalizeOkxOi(item, { symbol: upper, interval }))
+        .filter((row) => row && (since == null || row.timestamp >= since))
+        .map((row) => ({ ...row, instId: resolvedInst }));
 
       const nextTs = rows.reduce((max, row) => (row.timestamp > max ? row.timestamp : max), since);
       return {

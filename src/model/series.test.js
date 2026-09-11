@@ -1,6 +1,17 @@
 import { test } from 'node:test';
 import assert from 'node:assert';
-import { SeriesModel, filterRowsBySymbol, mapIndicatorRow, normalizeCandleRow, missingSeriesMessage, mergeDailyPreferLive, calendarDateKey, hasFiniteClose } from './series.js';
+import {
+  SeriesModel,
+  candleRowsForSymbol,
+  filterRowsBySymbol,
+  mapIndicatorRow,
+  mergeDailyPreferLive,
+  mergePackAndIngestRows,
+  missingSeriesMessage,
+  normalizeCandleRow,
+  calendarDateKey,
+  hasFiniteClose
+} from './series.js';
 import { parseCSV } from './ingest.js';
 import { formatUtcTick } from './dates.js';
 
@@ -234,6 +245,90 @@ test('getSeries attaches ETF millions and OI contracts, never oi_usd on the row'
   if (blankEtf) {
     assert.strictEqual(blankEtf.etf_net_flow_usd_millions, null);
   }
+});
+
+test('candleRowsForSymbol keeps unlabeled pack rows as BTC only', () => {
+  const rows = [
+    { timestamp: 1, close: 80000 },
+    { timestamp: 2, symbol: 'ETH', close: 3500 },
+    { timestamp: 3, symbol: 'BTC', close: 81000 }
+  ];
+  const btc = candleRowsForSymbol(rows, 'BTC');
+  const eth = candleRowsForSymbol(rows, 'ETH');
+  assert.deepStrictEqual(btc.map((row) => row.close), [80000, 81000]);
+  assert.deepStrictEqual(eth.map((row) => row.close), [3500]);
+});
+
+test('ETH 1h ingest candles chart without polluting BTC', () => {
+  const hour = 3600000;
+  const start = Date.parse('2026-08-30T00:00:00Z');
+  const btc = Array.from({ length: 4 }, (_, i) => ({
+    ts_ms: start + i * hour,
+    datetime_utc: new Date(start + i * hour).toISOString(),
+    open: 64000 + i,
+    high: 64100 + i,
+    low: 63900 + i,
+    close: 64050 + i,
+    volume: 100 + i
+  }));
+  const eth = Array.from({ length: 4 }, (_, i) => ({
+    symbol: 'ETH',
+    ts_ms: start + i * hour,
+    datetime_utc: new Date(start + i * hour).toISOString(),
+    open: 3400 + i,
+    high: 3410 + i,
+    low: 3390 + i,
+    close: 3405 + i,
+    volume: 10 + i
+  }));
+  const model = new SeriesModel();
+  const pack = makePack();
+  pack.candles_1h = { data: btc, missing: false, filename: 'okx_btc_usdt_swap_candles_1h.csv' };
+  pack.live_candles = eth.map((row) => ({
+    ...row,
+    source: 'okx-candles',
+    interval: '1h',
+    timestamp: row.ts_ms
+  }));
+  model.replaceData(pack);
+
+  const eth1h = model.getSeries('ETH', '1h');
+  const btc1h = model.getSeries('BTC', '1h');
+  assert.strictEqual(eth1h.length, 4);
+  assert.ok(eth1h.every((row) => row.close < 10000));
+  assert.ok(btc1h.every((row) => row.close > 60000));
+});
+
+test('daily ingest tail merges onto pack ETH without replacing Ichimoku', () => {
+  const packRow = {
+    timestamp: Date.parse('2026-08-10T00:00:00Z'),
+    close: 3220,
+    ma20: 3210,
+    senkouA: 3200,
+    senkouB: 3190
+  };
+  const ingestRow = {
+    timestamp: Date.parse('2026-08-10T00:00:00Z'),
+    close: 3300,
+    open: 3290
+  };
+  const tail = {
+    timestamp: Date.parse('2026-08-11T00:00:00Z'),
+    close: 3310
+  };
+  const merged = mergePackAndIngestRows([packRow], [ingestRow, tail]);
+  assert.strictEqual(merged.length, 2);
+  assert.strictEqual(merged[0].close, 3300);
+  assert.strictEqual(merged[0].ma20, 3210);
+  assert.strictEqual(merged[0].senkouA, 3200);
+  assert.strictEqual(merged[1].close, 3310);
+});
+
+test('AAPL missing series names the stock adapter gap', () => {
+  assert.match(missingSeriesMessage('AAPL', '1d', { assetClass: 'stock' }), /configured adapter/);
+  const model = new SeriesModel();
+  model.replaceData(makePack());
+  assert.throws(() => model.getSeries('AAPL', '1d'), /configured adapter/);
 });
 
 test('ETH series does not inherit BTC open interest', () => {
