@@ -8,6 +8,12 @@ import {
   markSymbolFor,
   sameInstrument
 } from './instrument.js';
+import {
+  collectInstrumentFills,
+  fillLotState,
+  isSellFill,
+  scaleBuyFillPrices
+} from './watch.js';
 
 export { INVESTMENTS_STORAGE_KEY };
 
@@ -343,25 +349,104 @@ export class InvestmentsStore {
       at: entry.createdAt
     });
     if (item.status === 'stopped') item.status = 'active';
+    if (item.entryOverride != null) item.entryOverride = null;
     this.save();
     return entry;
   }
 
-  updateRealUnitCost(record, unitCost) {
-    if (!record || !Number.isFinite(unitCost)) return 0;
+  findFill(fillId) {
+    if (!fillId) return null;
     const state = this.getState();
+    for (const track of state.collections.tracking || []) {
+      const fill = (track.fills || []).find((row) => row && row.id === fillId);
+      if (fill) return { kind: 'watch', fill, track };
+    }
+    for (const event of state.collections.events || []) {
+      if (event && event.id === fillId) return { kind: 'event', fill: event, event };
+    }
+    for (const trade of state.collections.paperTrades || []) {
+      if (trade && trade.id === fillId) return { kind: 'paper', fill: trade, trade };
+    }
+    return null;
+  }
+
+  updateFillPrice(fillId, unitCost) {
+    if (!Number.isFinite(unitCost)) return null;
+    const found = this.findFill(fillId);
+    if (!found) return null;
+    if (found.kind === 'watch') {
+      found.fill.price = unitCost;
+    } else if (found.kind === 'event') {
+      found.event.price = unitCost;
+      if (Number.isFinite(found.event.quantity)) {
+        found.event.costBasis = unitCost * Math.abs(found.event.quantity);
+      }
+      if (found.event.flags) found.event.flags.missingPrice = false;
+    } else if (found.kind === 'paper') {
+      found.trade.price = unitCost;
+    }
+    this.save();
+    return found;
+  }
+
+  /**
+   * Typo-fix remaining unit cost. Scales BUY fill/event prices so remaining
+   * lot average equals unitCost. Later Bought/Sold recompute Entry.
+   */
+  updateRemainingUnitCost(record, unitCost, { costMethod = 'fifo' } = {}) {
+    if (!record || !Number.isFinite(unitCost)) return { updated: 0, ok: false };
+    const state = this.getState();
+    const events = (state.collections.events || []).filter((event) => (
+      this.matchesInstrumentEvent(event, record)
+    ));
+    const track = (state.collections.tracking || []).find((row) => (
+      row && (row.id === record.id || sameInstrument(row, record))
+    ));
+    const fills = collectInstrumentFills(track || record, events);
+    const lot = fillLotState(fills, { costMethod });
+    if (!lot.hasLot || !Number.isFinite(lot.averagePrice) || lot.averagePrice === 0) {
+      return { updated: 0, ok: false, lot };
+    }
+    const scaled = scaleBuyFillPrices(fills, unitCost, { costMethod });
+    if (!scaled.ok) return { updated: 0, ok: false, lot };
+    const nextById = new Map(scaled.fills.filter((f) => f.id).map((f) => [f.id, f]));
     let updated = 0;
-    for (const event of state.collections.events) {
+    if (track && Array.isArray(track.fills)) {
+      track.fills = track.fills.map((fill) => {
+        const next = fill.id && nextById.get(fill.id);
+        if (!next || isSellFill(fill) || fill.price === next.price) return fill;
+        updated += 1;
+        return { ...fill, price: next.price };
+      });
+      track.entryOverride = null;
+    }
+    for (const event of state.collections.events || []) {
       if (!this.matchesInstrumentEvent(event, record)) continue;
       if (event.activityType !== 'buy') continue;
-      event.price = unitCost;
+      const next = event.id && nextById.get(event.id);
+      if (!next || event.price === next.price) continue;
+      event.price = next.price;
       if (Number.isFinite(event.quantity)) {
-        event.costBasis = unitCost * Math.abs(event.quantity);
+        event.costBasis = next.price * Math.abs(event.quantity);
       }
       updated += 1;
     }
+    for (const trade of state.collections.paperTrades || []) {
+      if (!this.matchesInstrumentEvent(trade, record)) continue;
+      if (String(trade.side || '').toUpperCase() === 'SELL') continue;
+      const next = trade.id && nextById.get(trade.id);
+      if (!next || trade.price === next.price) continue;
+      trade.price = next.price;
+      updated += 1;
+    }
     this.save();
-    return updated;
+    return { updated, ok: updated > 0 || scaled.ok, scale: scaled.scale, lot };
+  }
+
+  updateRealUnitCost(record, unitCost) {
+    return this.updateRemainingUnitCost(record, unitCost, {
+      costMethod: this.getCostMethod()
+    }).updated;
   }
 
   applyInstrumentClass(id, patch = {}) {

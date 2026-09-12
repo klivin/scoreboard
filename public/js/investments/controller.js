@@ -4,7 +4,9 @@ import { computeLotsAndPnl } from './lots.js';
 import { validatePaperTrade, startTrackingInput, todayIsoDate } from './tracking.js';
 import {
   applyStartMarkFreeze,
+  collectInstrumentFills,
   collectWatchTargets,
+  fillLotState,
   markSymbolFor
 } from './watch.js';
 import { fetchMarksForTargets, lastFiniteClose } from './marks.js';
@@ -15,6 +17,7 @@ import {
   defaultInstrumentClass,
   normalizeInstrumentClass,
   resolveWatchInstrument,
+  sameInstrument,
   suggestedEtfTickers
 } from './instrument.js';
 
@@ -260,23 +263,72 @@ export class InvestmentsController {
     return true;
   }
 
+  resolveWatchRecord(id) {
+    const tracking = this.store.collection('tracking') || [];
+    const existing = tracking.find((row) => row.id === id);
+    if (existing) return existing;
+    if (!String(id || '').startsWith('real_')) return null;
+    const parts = String(id).split('_');
+    const assetClass = parts[1];
+    const symbol = parts.slice(2).join('_');
+    return tracking.find((row) => sameInstrument(row, { symbol, assetClass, markSymbol: symbol }))
+      || { id, symbol, assetClass, markSymbol: symbol };
+  }
+
+  remainingLotFor(record) {
+    const events = this.store.collection('events') || [];
+    const fills = collectInstrumentFills(record, events);
+    return fillLotState(fills, { costMethod: this.store.getCostMethod() });
+  }
+
   editEntry(id) {
-    const record = (this.store.collection('tracking') || []).find((row) => row.id === id);
+    const record = this.resolveWatchRecord(id);
     if (!record) return false;
-    const current = record.entryOverride ?? record.baselinePrice ?? record.startMark ?? '';
-    const raw = this.promptImpl('Entry / cost', current == null ? '' : String(current));
+    const lot = this.remainingLotFor(record);
+    const current = lot.hasLot
+      ? lot.averagePrice
+      : (record.entryOverride ?? record.baselinePrice ?? record.startMark ?? '');
+    const label = lot.hasLot ? 'Remaining cost / share' : 'Entry / start mark';
+    const raw = this.promptImpl(label, current == null ? '' : String(current));
     if (raw == null) return false;
     const price = parseOptionalNumber(raw);
     if (!Number.isFinite(price)) {
       this.alertImpl('Entry / cost must be a number');
       return false;
     }
-    this.store.updateTracking(id, {
-      entryOverride: price,
-      baselinePrice: price,
-      startMark: record.startMark == null ? price : record.startMark
-    });
-    this.store.updateRealUnitCost(record, price);
+    if (lot.hasLot) {
+      if (record.id && !String(record.id).startsWith('real_')) {
+        this.store.updateTracking(record.id, { entryOverride: null });
+      }
+      this.store.updateRemainingUnitCost(record, price, {
+        costMethod: this.store.getCostMethod()
+      });
+    } else if (record.id && !String(record.id).startsWith('real_')) {
+      this.store.updateTracking(record.id, {
+        entryOverride: null,
+        baselinePrice: price,
+        startMark: price
+      });
+    }
+    this.refresh();
+    return true;
+  }
+
+  editFill(fillId) {
+    const found = this.store.findFill(fillId);
+    if (!found) return false;
+    const current = found.fill && found.fill.price;
+    const raw = this.promptImpl('Fill price / cost', current == null ? '' : String(current));
+    if (raw == null) return false;
+    const price = parseOptionalNumber(raw);
+    if (!Number.isFinite(price)) {
+      this.alertImpl('Fill price / cost must be a number');
+      return false;
+    }
+    this.store.updateFillPrice(fillId, price);
+    if (found.track && found.track.id) {
+      this.store.updateTracking(found.track.id, { entryOverride: null });
+    }
     this.refresh();
     return true;
   }
@@ -491,6 +543,12 @@ export class InvestmentsController {
     document.querySelectorAll('.inv-edit-entry-btn').forEach((btn) => {
       btn.addEventListener('click', () => {
         this.editEntry(btn.dataset.trackId);
+      });
+    });
+
+    document.querySelectorAll('.inv-edit-fill-btn').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        this.editFill(btn.dataset.fillId);
       });
     });
 

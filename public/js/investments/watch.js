@@ -80,43 +80,120 @@ export function evaluateTargetZone({
   };
 }
 
-export function fillLotState(fills = []) {
-  let qty = 0;
-  let basis = 0;
-  const ordered = (fills || []).slice().sort((a, b) => {
-    const da = String(a.date || '');
-    const db = String(b.date || '');
+function sortFills(fills = []) {
+  return (fills || []).slice().sort((a, b) => {
+    const da = String(a.date || a.activityDate || '');
+    const db = String(b.date || b.activityDate || '');
     if (da !== db) return da < db ? -1 : 1;
     return Number(a.createdAt || 0) - Number(b.createdAt || 0);
   });
+}
 
+export function isSellFill(fill) {
+  const side = String((fill && (fill.side || fill.activityType)) || '').toUpperCase();
+  return side === 'SELL' || side === 'SOLD';
+}
+
+export function isBuyFill(fill) {
+  const side = String((fill && (fill.side || fill.activityType)) || '').toUpperCase();
+  return side === 'BUY' || side === 'BOUGHT' || side === '';
+}
+
+/**
+ * Remaining open lot after fills. FIFO by default (same as REAL P&L).
+ * Average-cost remaining when costMethod === 'average'.
+ */
+export function fillLotState(fills = [], { costMethod = 'fifo' } = {}) {
+  const ordered = sortFills(fills);
+  if (costMethod === 'average') {
+    let qty = 0;
+    let basis = 0;
+    for (const fill of ordered) {
+      const q = Math.abs(finiteOrNull(fill.quantity) ?? 0);
+      const p = finiteOrNull(fill.price);
+      if (q <= 0) continue;
+      if (!isSellFill(fill)) {
+        qty += q;
+        if (p != null) basis += q * p;
+      } else if (qty > 0) {
+        const avg = basis / qty;
+        const take = Math.min(q, qty);
+        qty -= take;
+        basis -= avg * take;
+        if (qty <= 1e-12) {
+          qty = 0;
+          basis = 0;
+        }
+      }
+    }
+    return {
+      quantity: qty,
+      costBasis: qty > 0 ? basis : null,
+      averagePrice: qty > 0 ? basis / qty : null,
+      hasLot: qty > 1e-12
+    };
+  }
+
+  const lots = [];
   for (const fill of ordered) {
     const q = Math.abs(finiteOrNull(fill.quantity) ?? 0);
     const p = finiteOrNull(fill.price);
     if (q <= 0) continue;
-    const side = String(fill.side || fill.activityType || '').toUpperCase();
-    const isSell = side === 'SELL' || side === 'SOLD';
-    if (!isSell) {
-      qty += q;
-      if (p != null) basis += q * p;
-    } else if (qty > 0) {
-      const avg = basis / qty;
-      const take = Math.min(q, qty);
-      qty -= take;
-      basis -= avg * take;
-      if (qty <= 1e-12) {
-        qty = 0;
-        basis = 0;
+    if (!isSellFill(fill)) {
+      lots.push({ qty: q, price: p, fillId: fill.id || null });
+    } else {
+      let remaining = q;
+      while (remaining > 0 && lots.length) {
+        const lot = lots[0];
+        const take = Math.min(lot.qty, remaining);
+        lot.qty -= take;
+        remaining -= take;
+        if (lot.qty <= 1e-12) lots.shift();
       }
     }
   }
 
+  const qty = lots.reduce((sum, lot) => sum + lot.qty, 0);
+  const basis = lots.reduce((sum, lot) => (
+    finiteOrNull(lot.price) == null ? sum : sum + lot.qty * lot.price
+  ), 0);
   return {
     quantity: qty,
     costBasis: qty > 0 ? basis : null,
     averagePrice: qty > 0 ? basis / qty : null,
     hasLot: qty > 1e-12
   };
+}
+
+/**
+ * Typo-fix remaining unit cost by scaling BUY fill prices so remaining
+ * average equals newAverage. Does not lock Entry — later fills recompute.
+ */
+export function scaleBuyFillPrices(fills = [], newAverage, { costMethod = 'fifo' } = {}) {
+  const target = finiteOrNull(newAverage);
+  const lot = fillLotState(fills, { costMethod });
+  if (target == null || !lot.hasLot || !Number.isFinite(lot.averagePrice) || lot.averagePrice === 0) {
+    return { fills: (fills || []).slice(), scale: 1, ok: false };
+  }
+  const scale = target / lot.averagePrice;
+  const next = (fills || []).map((fill) => {
+    if (isSellFill(fill) || finiteOrNull(fill.price) == null) return { ...fill };
+    return { ...fill, price: fill.price * scale };
+  });
+  const after = fillLotState(next, { costMethod });
+  const drift = after.hasLot && Number.isFinite(after.averagePrice)
+    ? target - after.averagePrice
+    : 0;
+  if (drift !== 0 && after.quantity) {
+    for (let i = next.length - 1; i >= 0; i -= 1) {
+      const fill = next[i];
+      const qty = Math.abs(finiteOrNull(fill.quantity) ?? 0);
+      if (isSellFill(fill) || finiteOrNull(fill.price) == null || qty <= 0) continue;
+      next[i] = { ...fill, price: fill.price + (drift * after.quantity) / qty };
+      break;
+    }
+  }
+  return { fills: next, scale, ok: true };
 }
 
 export function eventToFill(event) {
@@ -160,25 +237,51 @@ export function fillVsMark(fill, mark) {
 }
 
 export function resolveWatchEntry({ record, realPosition, lot = null } = {}) {
-  if (record && finiteOrNull(record.entryOverride) != null) {
-    return { entry: finiteOrNull(record.entryOverride), entryKind: 'cost' };
-  }
   if (lot && lot.hasLot && finiteOrNull(lot.averagePrice) != null) {
-    return { entry: lot.averagePrice, entryKind: 'cost' };
+    return {
+      entry: lot.averagePrice,
+      entryKind: 'cost',
+      costBasis: finiteOrNull(lot.costBasis)
+    };
   }
   const realAvg = realPosition ? finiteOrNull(realPosition.averagePrice) : null;
   const realBasis = realPosition ? finiteOrNull(realPosition.costBasis) : null;
   const qty = realPosition ? finiteOrNull(realPosition.quantity) : null;
   if (realAvg != null) {
-    return { entry: realAvg, entryKind: 'cost' };
+    return { entry: realAvg, entryKind: 'cost', costBasis: realBasis };
   }
   if (realBasis != null && qty && qty !== 0) {
-    return { entry: realBasis / qty, entryKind: 'cost' };
+    return { entry: realBasis / qty, entryKind: 'cost', costBasis: realBasis };
+  }
+  if (record && finiteOrNull(record.entryOverride) != null) {
+    return { entry: finiteOrNull(record.entryOverride), entryKind: 'cost', costBasis: null };
   }
   const start = record
     ? (finiteOrNull(record.baselinePrice) ?? finiteOrNull(record.startMark))
     : null;
-  return { entry: start, entryKind: 'start' };
+  return { entry: start, entryKind: 'start', costBasis: null };
+}
+
+export function remainingUnrealized({ mark, lot = null, entry = null, direction = 'long' } = {}) {
+  const live = finiteOrNull(mark);
+  const qty = lot && lot.hasLot ? finiteOrNull(lot.quantity) : null;
+  const basis = lot && lot.hasLot
+    ? finiteOrNull(lot.costBasis)
+    : null;
+  const unit = finiteOrNull(entry) ?? (lot ? finiteOrNull(lot.averagePrice) : null);
+  if (live == null || qty == null || qty === 0) {
+    return { unrealizedPnl: null, unrealizedPct: null };
+  }
+  const dollar = basis != null
+    ? (live * qty) - basis
+    : (unit != null ? (live - unit) * qty : null);
+  if (dollar == null) return { unrealizedPnl: null, unrealizedPct: null };
+  const signed = normalizeDirection(direction) === 'short' ? -dollar : dollar;
+  const denom = basis != null ? basis : (unit != null ? unit * qty : null);
+  return {
+    unrealizedPnl: signed,
+    unrealizedPct: denom && denom !== 0 ? signed / denom : null
+  };
 }
 
 export function applyStartMarkFreeze(record, { liveMark = null, seriesStartClose = null } = {}) {
@@ -250,7 +353,8 @@ export function buildWatchRow(record, {
   realPositions = [],
   markPrices = {},
   markMeta = {},
-  events = []
+  events = [],
+  costMethod = 'fifo'
 } = {}) {
   const assetClass = record.needsInstrumentClass
     ? null
@@ -258,13 +362,14 @@ export function buildWatchRow(record, {
   const enriched = { ...record, assetClass, markSymbol: markSymbolFor({ ...record, assetClass }) };
   const real = matchingPosition(realPositions, enriched);
   const fills = collectInstrumentFills(enriched, events);
-  const lot = fillLotState(fills);
+  const lot = fillLotState(fills, { costMethod });
   const hasLot = lot.hasLot || Boolean(real && finiteOrNull(real.quantity) > 0);
   const mark = lookupMark(markPrices, enriched);
   const meta = lookupMeta(markMeta, enriched);
-  const { entry, entryKind } = resolveWatchEntry({ record: enriched, realPosition: real, lot });
+  const { entry, entryKind, costBasis } = resolveWatchEntry({ record: enriched, realPosition: real, lot });
   const direction = normalizeDirection(record.direction);
   const returnPct = watchReturnPct({ startMark: entry, mark, direction });
+  const vsLive = remainingUnrealized({ mark, lot: lot.hasLot ? lot : null, entry, direction });
   const zone = evaluateTargetZone({
     mark,
     target: record.targetPrice,
@@ -287,10 +392,12 @@ export function buildWatchRow(record, {
     startDate: record.startDate || null,
     entry,
     entryKind,
+    costBasis: costBasis ?? (lot.hasLot ? lot.costBasis : (real ? real.costBasis : null)),
     mark,
     markAsOf: meta && (meta.dateUtc || meta.asOf) || null,
     markAsOfTs: meta && meta.timestamp ? meta.timestamp : null,
-    returnPct,
+    returnPct: vsLive.unrealizedPct != null ? vsLive.unrealizedPct : returnPct,
+    unrealizedPnl: vsLive.unrealizedPnl,
     target: finiteOrNull(record.targetPrice),
     targetHigh: finiteOrNull(record.targetHigh),
     direction,
@@ -313,13 +420,15 @@ export function buildWatchRows({
   realPositions = [],
   markPrices = {},
   markMeta = {},
-  events = []
+  events = [],
+  costMethod = 'fifo'
 } = {}) {
   const rows = (tracking || []).filter(Boolean).map((record) => buildWatchRow(record, {
     realPositions,
     markPrices,
     markMeta,
-    events
+    events,
+    costMethod
   }));
 
   for (const position of realPositions || []) {
@@ -350,7 +459,8 @@ export function buildWatchRows({
       realPositions,
       markPrices,
       markMeta,
-      events
+      events,
+      costMethod
     }));
   }
 
