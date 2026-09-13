@@ -65,9 +65,13 @@ test('extractTickerQueries keeps CDNS and drops prose', () => {
   assert.deepStrictEqual(extractTickerQueries('thinking of buying more'), []);
 });
 
-test('stocks have no OKX instId candidates', () => {
+test('known stocks have no OKX instId candidates; unknown tickers do', () => {
   assert.deepStrictEqual(instIdCandidates(normalizeTicker('AAPL')), []);
   assert.strictEqual(classifyAssetClass('AAPL'), 'stock');
-  assert.deepStrictEqual(instIdCandidates(normalizeTicker('CDNS')), []);
-  assert.strictEqual(classifyAssetClass('CDNS'), 'stock');
+  assert.strictEqual(classifyAssetClass('CDNS'), 'unknown');
+  assert.deepStrictEqual(instIdCandidates(normalizeTicker('CDNS')).map((row) => row.instId), [
+    'CDNS-USDT-SWAP',
+    'CDNS-USDT'
+  ]);
+  assert.strictEqual(classifyAssetClass('HYPE'), 'unknown');
 });
