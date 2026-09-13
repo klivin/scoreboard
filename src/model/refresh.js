@@ -7,9 +7,12 @@ import {
   validateMonotonicAndGaps,
   watermarkId
 } from './source-adapter.js';
+import { sourceLabel, venueLabel } from './source-adapter.js';
 import { createOkxCandleAdapter, createOkxOiAdapter } from './okx-adapter.js';
+import { createCryptoCandleAdapter } from './crypto-adapter.js';
 import { createCoinGeckoAdapter, createEtfAdapter } from './fallback-adapters.js';
 import { createStockAdapter } from './stock-adapter.js';
+import { refreshAssetClassFromResolve, resolveTicker } from './resolve.js';
 import { normalizeTicker } from './ticker.js';
 import { rowsForAdapter, toStoreRows, upsertSeriesPage } from './ingest-store.js';
 import {
@@ -56,9 +59,11 @@ export function adaptersForTicker(symbol, deps = {}) {
     ];
   }
 
+  const useFallbackChain = parsed.assetClass !== 'crypto';
+  const candleFactory = useFallbackChain ? createCryptoCandleAdapter : createOkxCandleAdapter;
   const list = [
-    createOkxCandleAdapter({ symbol: parsed.symbol, interval: '1h', ...deps }),
-    createOkxCandleAdapter({ symbol: parsed.symbol, interval: '1d', ...deps })
+    candleFactory({ symbol: parsed.symbol, interval: '1h', ...deps }),
+    candleFactory({ symbol: parsed.symbol, interval: '1d', ...deps })
   ];
 
   if (parsed.symbol === 'BTC') {
@@ -121,7 +126,10 @@ export function createRefreshRuntime({
       gaps: 0,
       error: null,
       requestUrls: [],
-      requestedSince: null
+      requestedSince: null,
+      filledSource: null,
+      sourceLabel: null,
+      venue: null
     };
   }
 
@@ -217,14 +225,22 @@ export function createRefreshRuntime({
           mode: adapter.mode,
           note: fetched.note || null,
           needsAdapter: Boolean(fetched.needsAdapter),
-          missing: true
+          missing: true,
+          filledSource: fetched.filledSource || null,
+          sourceLabel: sourceLabel(adapter.id, fetched.filledSource),
+          venue: fetched.venue || null
         };
       }
+      const persistSource = fetched.source || adapter.id;
       const incoming = toStoreRows(fetched.rows || [], {
         source: adapter.id,
         symbol: adapter.symbol,
         interval: adapter.interval
-      });
+      }).map((row) => ({
+        ...row,
+        filledSource: fetched.filledSource || persistSource,
+        provider: persistSource
+      }));
       const { rows, issues } = validateMonotonicAndGaps(incoming, {
         source: adapter.id,
         symbol: adapter.symbol,
@@ -287,7 +303,10 @@ export function createRefreshRuntime({
         nextCursor: fetched.nextCursor,
         mode: adapter.mode,
         note: fetched.note || null,
-        fallback: fetched.fallback || null
+        fallback: fetched.fallback || null,
+        filledSource: fetched.filledSource || persistSource,
+        sourceLabel: sourceLabel(persistSource, fetched.filledSource),
+        venue: fetched.venue || venueLabel(null, fetched.filledSource)
       };
     } catch (error) {
       errorLogStore.add({
@@ -317,13 +336,22 @@ export function createRefreshRuntime({
     }
 
     state.running = true;
-    if (filter && filter.symbol) {
-      ensureSymbolAdapters(filter.symbol, { assetClass: filter.assetClass });
-    }
-    const selected = adapterList.filter((adapter) => matchesFilter(adapter, filter));
-    const results = [];
-
+    let resolved = null;
     try {
+      if (filter && filter.symbol) {
+        resolved = await resolveTicker(filter.symbol, {
+          httpGet: http,
+          assetClass: filter.assetClass
+        });
+        const resolvedClass = filter.assetClass || refreshAssetClassFromResolve(resolved);
+        ensureSymbolAdapters(filter.symbol, { assetClass: resolvedClass });
+        if (resolvedClass && !filter.assetClass) {
+          filter = { ...filter, assetClass: resolvedClass };
+        }
+      }
+      const selected = adapterList.filter((adapter) => matchesFilter(adapter, filter));
+      const results = [];
+
       for (const adapter of selected) {
         const result = await refreshOne(adapter);
         results.push(result);
@@ -338,9 +366,19 @@ export function createRefreshRuntime({
       }
       state.lastRunAt = now();
       hydrateFromWatermarks(state.lastRunAt);
+      const filled = results.find((row) => row && row.filledSource && row.status === 'ok');
+      const nowTs = now();
       return {
         ...getStatus(),
-        ran: results
+        ran: results.map((row) => ({
+          ...row,
+          lastSuccessAgeMs: ageMs(row.lastSuccessAt, nowTs)
+        })),
+        resolve: resolved,
+        needsPicker: Boolean(resolved && resolved.needsPicker),
+        filledSource: filled && filled.filledSource || null,
+        sourceLabel: filled ? sourceLabel(filled.id, filled.filledSource) : null,
+        venue: resolved ? venueLabel(resolved.assetClass, filled && filled.filledSource) : null
       };
     } finally {
       state.running = false;

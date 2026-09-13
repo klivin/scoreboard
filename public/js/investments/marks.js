@@ -67,6 +67,8 @@ function missingResult(symbol, assetClass, error) {
     lastDateUtc: null,
     timestamp: null,
     series: [],
+    source: null,
+    sourceLabel: null,
     error: error || 'missing'
   };
 }
@@ -98,8 +100,10 @@ export async function fetchSymbolMark(symbol, options = {}) {
   const cls = refreshAssetClassParam(target.assetClass);
   if (cls) refreshParams.set('assetClass', cls);
 
+  let refreshMeta = {};
   try {
-    await fetchImpl(`/api/refresh?${refreshParams.toString()}`, { method: 'POST' });
+    const refreshResponse = await fetchImpl(`/api/refresh?${refreshParams.toString()}`, { method: 'POST' });
+    refreshMeta = await refreshResponse.json().catch(() => ({}));
   } catch {
     // Refresh failure still tries cached indicators; do not invent.
   }
@@ -128,6 +132,9 @@ export async function fetchSymbolMark(symbol, options = {}) {
       lastDateUtc: last ? last.dateUtc : null,
       timestamp: last ? last.timestamp : null,
       series,
+      source: refreshMeta.filledSource || refreshMeta.sourceLabel || null,
+      sourceLabel: refreshMeta.sourceLabel || refreshMeta.filledSource || null,
+      venue: refreshMeta.venue || target.assetClass,
       error: last ? null : 'missing'
     };
   } catch (error) {
@@ -150,8 +157,15 @@ export async function fetchMarksForSymbols(symbols, options = {}) {
     if (Number.isFinite(result.mark)) marks[key] = result.mark;
     if (Number.isFinite(result.startClose)) startCloses[key] = result.startClose;
     if (result.error) errors[key] = result.error;
-    if (result.asOf || result.timestamp) {
-      meta[key] = { dateUtc: result.asOf, timestamp: result.timestamp, asOf: result.asOf };
+    if (result.asOf || result.timestamp || result.sourceLabel) {
+      meta[key] = {
+        dateUtc: result.asOf,
+        timestamp: result.timestamp,
+        asOf: result.asOf,
+        source: result.source || result.sourceLabel || null,
+        sourceLabel: result.sourceLabel || result.source || null,
+        venue: result.venue || result.assetClass || null
+      };
     }
   }
   return { marks, startCloses, errors, meta };
@@ -173,8 +187,15 @@ export async function fetchMarksForTargets(targets, options = {}) {
     if (Number.isFinite(result.mark)) marks[key] = result.mark;
     if (Number.isFinite(result.startClose)) startCloses[key] = result.startClose;
     if (result.error) errors[key] = result.error;
-    if (result.asOf || result.timestamp) {
-      meta[key] = { dateUtc: result.asOf, timestamp: result.timestamp, asOf: result.asOf };
+    if (result.asOf || result.timestamp || result.sourceLabel) {
+      meta[key] = {
+        dateUtc: result.asOf,
+        timestamp: result.timestamp,
+        asOf: result.asOf,
+        source: result.source || result.sourceLabel || null,
+        sourceLabel: result.sourceLabel || result.source || null,
+        venue: result.venue || result.assetClass || null
+      };
     }
   }
   return { marks, startCloses, errors, meta };

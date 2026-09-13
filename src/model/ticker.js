@@ -54,12 +54,24 @@ export function looksLikeUsEquityTicker(symbol) {
   return /^[A-Z]{1,5}$/.test(upper);
 }
 
+export function isKnownCrypto(symbol) {
+  const upper = String(symbol || '').toUpperCase();
+  return KNOWN_CRYPTO.has(upper) || KNOWN_CRYPTO_EXTRAS.has(upper);
+}
+
+export function isKnownStock(symbol) {
+  return KNOWN_STOCKS.has(String(symbol || '').toUpperCase());
+}
+
+/**
+ * Local classify only. Unknown 1–5 letter tickers stay unknown — they are not
+ * defaulted to Yahoo equity. HYPE (Hyperliquid) must reach OKX/CoinGecko.
+ */
 export function classifyAssetClass(symbol, marketHint = null) {
   const upper = String(symbol || '').toUpperCase();
   if (marketHint === 'swap' || marketHint === 'spot' || marketHint === 'crypto') return 'crypto';
-  if (KNOWN_CRYPTO.has(upper) || KNOWN_CRYPTO_EXTRAS.has(upper)) return 'crypto';
-  if (KNOWN_STOCKS.has(upper)) return 'stock';
-  if (looksLikeUsEquityTicker(upper)) return 'stock';
+  if (isKnownCrypto(upper)) return 'crypto';
+  if (isKnownStock(upper)) return 'stock';
   return 'unknown';
 }
 
@@ -105,6 +117,7 @@ export function normalizeTicker(raw) {
   }
 
   const assetClass = classifyAssetClass(symbol, marketHint);
+  const equityHint = looksLikeUsEquityTicker(symbol);
   if (assetClass !== 'stock') {
     instIdSwap = instIdSwap || `${symbol}-USDT-SWAP`;
     instIdSpot = instIdSpot || `${symbol}-USDT`;
@@ -113,6 +126,7 @@ export function normalizeTicker(raw) {
   return {
     symbol,
     assetClass,
+    equityHint,
     instIdSwap,
     instIdSpot,
     marketHint,
@@ -151,8 +165,8 @@ export function extractTickerQueries(text, { loose = false } = {}) {
     if (requireCaps && original !== original.toUpperCase()) return;
     const upper = original.toUpperCase();
     if (!upper || seen.has(upper) || TICKER_STOPWORDS.has(upper)) return;
-    const crypto = KNOWN_CRYPTO.has(upper) || KNOWN_CRYPTO_EXTRAS.has(upper);
-    const equity = KNOWN_STOCKS.has(upper) || looksLikeUsEquityTicker(upper);
+    const crypto = isKnownCrypto(upper);
+    const equity = isKnownStock(upper) || looksLikeUsEquityTicker(upper);
     if (!crypto && !equity) return;
     seen.add(upper);
     found.push(upper);
@@ -166,6 +180,7 @@ function emptyResult(input, error) {
   return {
     symbol: '',
     assetClass: 'unknown',
+    equityHint: false,
     instIdSwap: null,
     instIdSpot: null,
     marketHint: null,

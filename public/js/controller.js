@@ -15,6 +15,8 @@ export class AppController {
     this.currentSymbol = 'BTC';
     this.currentInterval = '1d';
     this.currentHorizon = 7;
+    this.currentAssetClass = null;
+    this.lastResolve = null;
     this.investments = null;
     this.forecasts = null;
   }
@@ -68,16 +70,24 @@ export class AppController {
         : (src.status === 'missing' || src.needsAdapter
           ? 'src-fallback'
           : (src.mode === 'incremental' ? 'src-ok' : 'src-fallback'));
+      const filled = src.sourceLabel || src.filledSource;
+      const venue = src.venue ? ` · ${src.venue}` : '';
+      const sourceBit = filled ? ` via <em>${filled}</em>${venue}` : venue;
       const extra = src.error
         ? ` — ${src.error}`
         : (src.note && (src.status === 'missing' || src.needsAdapter)
           ? ` — ${src.note}`
           : ` — last success ${age}${src.rowCount != null ? `, ${src.rowCount} rows` : ''}`);
-      return `<li class="${cls}"><strong>${src.id}</strong> ${src.symbol} ${src.interval} (${mode})${extra}</li>`;
+      return `<li class="${cls}"><strong>${src.id}</strong> ${src.symbol} ${src.interval}${sourceBit} (${mode})${extra}</li>`;
     }).join('');
 
-    panel.innerHTML = `<h3>${heading}</h3><ul>${rows}</ul>`;
+    const resolve = payload && payload.resolve;
+    const banner = payload && payload.sourceLabel
+      ? `<p class="ticker-source-used">Filled by <strong>${payload.sourceLabel}</strong>${payload.venue ? ` · ${payload.venue}` : ''}.</p>`
+      : '';
+    panel.innerHTML = `<h3>${heading}</h3>${banner}<ul>${rows}</ul>`;
     panel.classList.remove('hidden');
+    this.renderTickerVenue(resolve || payload, payload);
   }
 
   async refreshSources() {
@@ -95,6 +105,8 @@ export class AppController {
     const symbol = this.getSelectedSymbol();
     const params = new URLSearchParams();
     if (symbol) params.set('symbol', symbol);
+    const assetClass = this.getSelectedAssetClass();
+    if (assetClass) params.set('assetClass', assetClass);
     const response = await fetch(`/api/refresh?${params.toString()}`, { method: 'POST' });
     const result = await response.json().catch(() => ({}));
     if (!response.ok && !result.sources) {
@@ -185,18 +197,69 @@ export class AppController {
     });
   }
 
-  setSelectedSymbol(symbol, { remember = true, render = true } = {}) {
+  setSelectedSymbol(symbol, { remember = true, render = true, assetClass = undefined } = {}) {
     const parsed = normalizeTickerInput(symbol);
     const upper = parsed.symbol || String(symbol || '').toUpperCase();
     if (!upper) return '';
     this.currentSymbol = upper;
+    if (assetClass !== undefined) {
+      const cls = String(assetClass || '').toLowerCase();
+      this.currentAssetClass = (cls === 'crypto' || cls === 'coin')
+        ? 'crypto'
+        : (cls === 'etf' || cls === 'equity' || cls === 'stock' ? (cls === 'stock' ? 'equity' : cls) : null);
+    }
     const input = document.getElementById('ticker-input');
     if (input) input.value = upper;
     const hidden = document.getElementById('symbol-select');
     if (hidden) hidden.value = upper;
+    const classSelect = document.getElementById('ticker-class-select');
+    if (classSelect && this.currentAssetClass) classSelect.value = this.currentAssetClass;
     if (remember) rememberTicker(upper);
     if (render) this.renderRecentTickers();
     return upper;
+  }
+
+  getSelectedAssetClass() {
+    const select = document.getElementById('ticker-class-select');
+    const raw = (select && select.value) || this.currentAssetClass || '';
+    const cls = String(raw).toLowerCase();
+    if (cls === 'crypto' || cls === 'coin') return 'crypto';
+    if (cls === 'etf') return 'etf';
+    if (cls === 'equity' || cls === 'stock') return 'equity';
+    return null;
+  }
+
+  renderTickerVenue(resolve, payload) {
+    const picker = document.getElementById('ticker-class-picker');
+    const venue = document.getElementById('ticker-venue');
+    const symbol = (resolve && resolve.symbol) || this.getSelectedSymbol();
+    if (resolve) this.lastResolve = resolve;
+    if (venue) {
+      const filled = payload && (payload.sourceLabel || payload.filledSource);
+      const classLabel = resolve && resolve.venue
+        ? `${symbol} · ${resolve.venue}`
+        : (this.currentAssetClass === 'crypto' ? `${symbol} · coin` : '');
+      const source = filled ? ` · ${filled}` : '';
+      venue.textContent = classLabel || source ? `${classLabel || symbol}${source}` : '';
+      venue.classList.toggle('hidden', !venue.textContent);
+    }
+    if (!picker) return;
+    const needsPicker = Boolean(resolve && resolve.needsPicker);
+    picker.classList.toggle('hidden', !needsPicker);
+    if (!needsPicker) return;
+    const options = (resolve.candidates || []).map((row) => (
+      `<button type="button" class="ticker-class-btn" data-asset-class="${row.assetClass}">${row.label || row.assetClass}</button>`
+    )).join('');
+    picker.innerHTML = `<p>This ticker exists as coin and equity. Pick a venue:</p><div class="ticker-class-buttons">${options}</div>`;
+    picker.querySelectorAll('[data-asset-class]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        this.currentAssetClass = btn.dataset.assetClass === 'stock' ? 'equity' : btn.dataset.assetClass;
+        const select = document.getElementById('ticker-class-select');
+        if (select) select.value = this.currentAssetClass;
+        picker.classList.add('hidden');
+        this.reloadSelected();
+      });
+    });
   }
 
   syncChartOptionsFromCheckboxes() {
@@ -450,6 +513,20 @@ export class AppController {
           event.preventDefault();
           this.addAndLoadTicker();
         }
+      });
+      tickerInput.addEventListener('input', () => {
+        this.currentAssetClass = null;
+        const select = document.getElementById('ticker-class-select');
+        if (select) select.value = '';
+      });
+    }
+
+    const classSelect = document.getElementById('ticker-class-select');
+    if (classSelect) {
+      classSelect.addEventListener('change', () => {
+        const value = classSelect.value;
+        this.currentAssetClass = value || null;
+        if (this.getSelectedSymbol()) this.reloadSelected();
       });
     }
 

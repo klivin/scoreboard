@@ -18,6 +18,7 @@ import {
   handleGetBacktest,
   handlePostRefresh,
   handleGetRefreshStatus,
+  handleGetResolve,
   handleGetChatStatus,
   handlePostChat
 } from './controller/api.js';
@@ -52,6 +53,7 @@ app.get('/api/trading-signals', handleGetTradingSignals);
 app.get('/api/backtest', handleGetBacktest);
 app.post('/api/refresh', handlePostRefresh);
 app.get('/api/refresh/status', handleGetRefreshStatus);
+app.get('/api/resolve', handleGetResolve);
 app.get('/api/chat/status', handleGetChatStatus);
 app.post('/api/chat', handlePostChat);
 

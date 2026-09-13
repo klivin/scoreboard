@@ -8,8 +8,10 @@ import {
   STOCK_ADAPTER_ID,
   STOCK_SOURCE,
   STOCK_SOURCE_NOTE,
+  appendYahooCrumb,
   buildYahooChartUrl,
   buildStooqDailyUrl,
+  fetchYahooCrumb,
   parseYahooChartBody,
   parseStooqCsv
 } from './stock-adapter.js';
@@ -188,6 +190,19 @@ test('refresh for CDNS upserts Yahoo rows and never invents extras', async () =>
   assert.ok(seriesStore.getAll().every((row) => row.symbol === 'CDNS' && Number.isFinite(row.close)));
 });
 
+test('Yahoo crumb helper appends crumb and never invents bars', async () => {
+  const crumbUrl = appendYahooCrumb('https://query1.finance.yahoo.com/v8/finance/chart/AAPL?interval=1d', 'abc.def');
+  assert.ok(crumbUrl.includes('crumb=abc.def'));
+  const calls = [];
+  const crumb = await fetchYahooCrumb(async (url) => {
+    calls.push(url);
+    if (url.includes('getcrumb')) return { ok: true, status: 200, text: 'crumb-token', url };
+    return { ok: true, status: 200, text: '', url, headers: { getSetCookie: () => ['A=1'] } };
+  });
+  assert.strictEqual(crumb.crumb, 'crumb-token');
+  assert.ok(calls.some((url) => url.includes('getcrumb')));
+});
+
 test('Yahoo and Stooq URL builders never include keys', () => {
   const yahoo = buildYahooChartUrl({ symbol: 'CDNS', interval: '1h' });
   assert.ok(yahoo.includes('/v8/finance/chart/CDNS'));
@@ -198,8 +213,9 @@ test('Yahoo and Stooq URL builders never include keys', () => {
   assert.ok(!/key|secret/i.test(stooq));
 });
 
-test('CDNS classifies as stock without a hardcoded allowlist entry', () => {
-  assert.strictEqual(normalizeTicker('CDNS').assetClass, 'stock');
+test('CDNS is an equity-shaped unknown, not a default Yahoo stock', () => {
+  assert.strictEqual(normalizeTicker('CDNS').assetClass, 'unknown');
+  assert.strictEqual(normalizeTicker('CDNS').equityHint, true);
   assert.strictEqual(normalizeTicker('cdns').symbol, 'CDNS');
 });
 

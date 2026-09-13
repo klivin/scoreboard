@@ -30,6 +30,15 @@
           <input id="ticker-input" type="text" value="BTC" placeholder="ETH, SOL, AAPL…" autocomplete="off" spellcheck="false" />
           <button type="button" id="ticker-add-btn">Add / Load</button>
         </label>
+        <label class="ticker-class-field">
+          Venue:
+          <select id="ticker-class-select">
+            <option value="">auto (crypto first)</option>
+            <option value="crypto">crypto · coin</option>
+            <option value="etf">ETF</option>
+            <option value="equity">equity</option>
+          </select>
+        </label>
         <input type="hidden" id="symbol-select" value="BTC" />
         <label>
           Interval:
@@ -42,7 +51,9 @@
         <button id="download-csv-btn">Download CSV</button>
       </div>
       <div id="ticker-recent" class="ticker-recent" aria-label="Recent tickers"></div>
-      <p class="ticker-hint">Type a crypto (OKX public swap/spot) or stock ticker. Stocks need a configured adapter — prices are never invented.</p>
+      <p class="ticker-hint">Type a ticker. Unknown names try crypto first (OKX → CoinGecko → Binance). If the same ticker is also an ETF/equity, pick a venue. Prices are never invented.</p>
+      <div id="ticker-venue" class="ticker-venue hidden" aria-live="polite"></div>
+      <div id="ticker-class-picker" class="ticker-class-picker hidden"></div>
       <div id="refresh-status" class="refresh-status hidden" aria-live="polite"></div>
 
       <div id="chart-container">

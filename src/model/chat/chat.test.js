@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert';
 import { defaultCatalog, findCatalogMentions, lookupAsset } from './catalog.js';
-import { resolveAssets, searchAssets, getChartContext, createToolRunner, TOOL_DEFINITIONS } from './tools.js';
+import { resolveAssets, resolveAssetsAsync, searchAssets, getChartContext, createToolRunner, TOOL_DEFINITIONS } from './tools.js';
 import { sanitizeAssistantContent, cardsFromResolved } from './blocks.js';
 import { createStubProvider, stubIntent } from './stub.js';
 import { runChatTurn, chatStatus } from './loop.js';
@@ -56,16 +56,32 @@ test('resolve_assets: unknown is rejected', () => {
   assert.strictEqual(row.symbol, null);
 });
 
-test('resolve_assets: CDNS-like equity resolves without catalog allowlist', () => {
+test('resolve_assets: CDNS-like ticker resolves without catalog allowlist (crypto-first until probed)', () => {
   assert.strictEqual(lookupAsset('CDNS', catalog), null);
   const [row] = resolveAssets(['CDNS'], catalog);
   assert.strictEqual(row.ok, true);
   assert.strictEqual(row.symbol, 'CDNS');
-  assert.strictEqual(row.assetClass, 'equity');
-  assert.strictEqual(row.scoreboardId, 'equity:CDNS');
-  assert.strictEqual(row.catalogHint, false);
-  assert.deepStrictEqual(row.load, { symbol: 'CDNS', assetClass: 'equity', intervalHint: '1d' });
+  assert.strictEqual(row.needsResolve, true);
+  assert.deepStrictEqual(row.load, { symbol: 'CDNS', assetClass: 'unknown', intervalHint: '1d' });
   assert.ok(!catalog.some((asset) => asset.symbol === 'CDNS'), 'CDNS must not be a hardcoded catalog row');
+});
+
+test('resolve_assets async: HYPE is crypto · coin after venue probe', async () => {
+  const rows = await resolveAssetsAsync(['HYPE'], catalog, {
+    resolveTicker: async () => ({
+      ok: true,
+      symbol: 'HYPE',
+      assetClass: 'crypto',
+      venue: 'coin',
+      needsPicker: false,
+      crypto: { exists: true, source: 'okx' },
+      candidates: []
+    })
+  });
+  assert.strictEqual(rows[0].ok, true);
+  assert.strictEqual(rows[0].symbol, 'HYPE');
+  assert.strictEqual(rows[0].assetClass, 'crypto');
+  assert.deepStrictEqual(rows[0].load, { symbol: 'HYPE', assetClass: 'crypto', intervalHint: '1d' });
 });
 
 test('extractTickerQueries finds CDNS in an entry question', () => {

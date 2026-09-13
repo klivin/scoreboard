@@ -1,4 +1,4 @@
-import { httpGet, parseJsonBody } from './http.js';
+import { BROWSER_HEADERS, createCookieJar, httpGet, parseJsonBody } from './http.js';
 import { intervalMs } from './source-adapter.js';
 import { normalizeTicker } from './ticker.js';
 
@@ -14,16 +14,29 @@ export const STOCK_SOURCE_NOTE = [
   'Equity candles: Yahoo Finance public chart API',
   '(query1/query2.finance.yahoo.com/v8/finance/chart), no key.',
   'Daily required; hourly when Yahoo returns 1h bars.',
-  'Stooq daily CSV is a fallback (often JS-challenge blocked from datacenter IPs).',
+  'Yahoo crumb cookie is used when the anonymous chart call fails.',
+  'Stooq daily CSV is a fallback (browser-like User-Agent).',
   'Empty means the public source returned no bars — prices are not invented.'
 ].join(' ');
 
 export const STOCK_MISSING_NOTE = STOCK_SOURCE_NOTE;
 
 const YAHOO_HEADERS = {
-  'User-Agent': 'Mozilla/5.0 (compatible; Scoreboard/1.0; public market data; no keys)',
+  ...BROWSER_HEADERS,
   Accept: 'application/json,text/csv;q=0.8,*/*;q=0.5'
 };
+
+const STOOQ_HEADERS = {
+  ...BROWSER_HEADERS,
+  Accept: 'text/csv,text/plain;q=0.9,*/*;q=0.5',
+  Referer: 'https://stooq.com/'
+};
+
+export const YAHOO_CRUMB_URLS = [
+  'https://fc.yahoo.com',
+  'https://query1.finance.yahoo.com/v1/test/getcrumb',
+  'https://query2.finance.yahoo.com/v1/test/getcrumb'
+];
 
 const DEFAULT_RANGE = { '1h': '3mo', '1d': '5y' };
 
@@ -171,8 +184,8 @@ export function parseStooqCsv(text, { symbol, interval = '1d' } = {}) {
   return { rows, error: rows.length ? null : 'Stooq CSV parsed zero finite closes' };
 }
 
-async function readYahooPage(http, url) {
-  const response = await http(url, { headers: YAHOO_HEADERS });
+async function readYahooPage(http, url, extra = {}) {
+  const response = await http(url, { headers: YAHOO_HEADERS, cookieJar: extra.cookieJar });
   const body = parseJsonBody(response.text);
   if (!response.ok) {
     const err = body && body.chart && body.chart.error;
@@ -180,6 +193,43 @@ async function readYahooPage(http, url) {
     throw new Error(`Yahoo chart failed (${url}): ${message}`);
   }
   return { body, url, status: response.status };
+}
+
+function looksLikeCrumb(text) {
+  const crumb = String(text || '').trim();
+  if (!crumb || crumb.startsWith('<') || crumb.length > 80) return null;
+  if (/unauthorized|error|invalid/i.test(crumb)) return null;
+  return crumb;
+}
+
+export async function fetchYahooCrumb(http = httpGet) {
+  const cookieJar = createCookieJar();
+  const requestUrls = [];
+  try {
+    const seedUrl = YAHOO_CRUMB_URLS[0];
+    requestUrls.push(seedUrl);
+    await http(seedUrl, { headers: BROWSER_HEADERS, cookieJar });
+  } catch {
+    // fc.yahoo.com is only used to collect cookies
+  }
+  for (const url of YAHOO_CRUMB_URLS.slice(1)) {
+    requestUrls.push(url);
+    try {
+      const response = await http(url, { headers: BROWSER_HEADERS, cookieJar });
+      const crumb = looksLikeCrumb(response.text);
+      if (crumb) return { crumb, cookieJar, requestUrls };
+    } catch {
+      continue;
+    }
+  }
+  return { crumb: null, cookieJar, requestUrls };
+}
+
+export function appendYahooCrumb(url, crumb) {
+  if (!crumb) return url;
+  const next = new URL(url);
+  next.searchParams.set('crumb', crumb);
+  return next.toString();
 }
 
 export function createStockAdapter({
@@ -203,48 +253,75 @@ export function createStockAdapter({
       const stamp = now();
       let lastError = null;
 
-      for (const host of YAHOO_CHART_HOSTS) {
-        const url = buildYahooChartUrl({
-          symbol: upper,
-          interval,
-          since,
-          now: stamp,
-          host
-        });
-        requestUrls.push(url);
-        try {
-          const { body } = await readYahooPage(http, url);
-          const parsedChart = parseYahooChartBody(body, { symbol: upper, interval });
-          const rows = (parsedChart.rows || []).filter((row) => (
-            since == null || row.timestamp >= since
-          ));
-          if (rows.length) {
-            const nextTs = rows.reduce((max, row) => (row.timestamp > max ? row.timestamp : max), since);
+      const crumbState = { crumb: null, cookieJar: null };
+      const tryYahooUrls = async (urls) => {
+        for (const url of urls) {
+          requestUrls.push(url);
+          try {
+            const { body } = await readYahooPage(http, url, { cookieJar: crumbState.cookieJar });
+            const parsedChart = parseYahooChartBody(body, { symbol: upper, interval });
+            const rows = (parsedChart.rows || []).filter((row) => (
+              since == null || row.timestamp >= since
+            ));
+            if (rows.length) {
+              const nextTs = rows.reduce((max, row) => (row.timestamp > max ? row.timestamp : max), since);
+              return {
+                rows,
+                nextCursor: nextTs != null ? { lastTimestamp: nextTs } : null,
+                requestUrls,
+                requestedSince: since,
+                missing: false,
+                filledSource: 'yahoo',
+                source: STOCK_SOURCE,
+                venue: parsedChart.meta && parsedChart.meta.exchangeName,
+                name: parsedChart.meta && (parsedChart.meta.shortName || parsedChart.meta.longName),
+                note: STOCK_SOURCE_NOTE
+              };
+            }
+            lastError = parsedChart.error || 'Yahoo chart returned zero finite closes';
+          } catch (error) {
+            lastError = error.message || String(error);
+            const notFound = /404|Not Found|delisted/i.test(lastError);
+            if (notFound) return null;
+          }
+        }
+        return null;
+      };
+
+      const yahooUrls = YAHOO_CHART_HOSTS.map((host) => buildYahooChartUrl({
+        symbol: upper,
+        interval,
+        since,
+        now: stamp,
+        host
+      }));
+      const firstYahoo = await tryYahooUrls(yahooUrls);
+      if (firstYahoo) return firstYahoo;
+
+      try {
+        const crumb = await fetchYahooCrumb(http);
+        requestUrls.push(...(crumb.requestUrls || []));
+        if (crumb.crumb) {
+          crumbState.crumb = crumb.crumb;
+          crumbState.cookieJar = crumb.cookieJar;
+          const crumbUrls = yahooUrls.map((url) => appendYahooCrumb(url, crumb.crumb));
+          const crumbHit = await tryYahooUrls(crumbUrls);
+          if (crumbHit) {
             return {
-              rows,
-              nextCursor: nextTs != null ? { lastTimestamp: nextTs } : null,
-              requestUrls,
-              requestedSince: since,
-              missing: false,
-              source: STOCK_SOURCE,
-              venue: parsedChart.meta && parsedChart.meta.exchangeName,
-              name: parsedChart.meta && (parsedChart.meta.shortName || parsedChart.meta.longName),
-              note: STOCK_SOURCE_NOTE
+              ...crumbHit,
+              note: `${STOCK_SOURCE_NOTE} Used Yahoo v8 crumb.`
             };
           }
-          lastError = parsedChart.error || 'Yahoo chart returned zero finite closes';
-        } catch (error) {
-          lastError = error.message || String(error);
-          const notFound = /404|Not Found|delisted/i.test(lastError);
-          if (notFound) break;
         }
+      } catch (error) {
+        lastError = error.message || lastError;
       }
 
       if (interval === '1d') {
         const stooqUrl = buildStooqDailyUrl(upper);
         requestUrls.push(stooqUrl);
         try {
-          const response = await http(stooqUrl, { headers: YAHOO_HEADERS });
+          const response = await http(stooqUrl, { headers: STOOQ_HEADERS });
           const parsedCsv = parseStooqCsv(response.text, { symbol: upper, interval: '1d' });
           const rows = (parsedCsv.rows || []).filter((row) => (
             since == null || row.timestamp >= since
@@ -257,6 +334,7 @@ export function createStockAdapter({
               requestUrls,
               requestedSince: since,
               missing: false,
+              filledSource: 'stooq',
               source: 'stooq',
               note: `${STOCK_SOURCE_NOTE} Used Stooq daily CSV fallback.`
             };
@@ -273,6 +351,7 @@ export function createStockAdapter({
         requestUrls,
         requestedSince: since,
         missing: true,
+        filledSource: null,
         note: [
           `No public equity candles for ${upper} ${interval}.`,
           lastError || 'Yahoo/Stooq returned empty.',

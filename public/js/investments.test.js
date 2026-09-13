@@ -1162,6 +1162,7 @@ test('instrument class: OKX coins vs Yahoo ETFs vs equity', () => {
   assert.strictEqual(defaultInstrumentClass('IBIT'), 'etf');
   assert.strictEqual(defaultInstrumentClass('ETHA'), 'etf');
   assert.strictEqual(defaultInstrumentClass('CDNS'), 'equity');
+  assert.strictEqual(defaultInstrumentClass('HYPE'), 'crypto');
   assert.strictEqual(formatInstrumentLabel({ symbol: 'BTC', assetClass: 'crypto' }), 'BTC · coin');
   assert.strictEqual(formatInstrumentLabel({ symbol: 'IBIT', assetClass: 'etf', yahooTicker: 'IBIT' }), 'IBIT · ETF');
   assert.strictEqual(formatInstrumentLabel({ symbol: 'CDNS', assetClass: 'equity' }), 'CDNS · equity');

@@ -66,9 +66,15 @@ export function normalizeTickerInput(raw) {
 
   let assetClass = 'unknown';
   if (marketHint || PACK_CRYPTO.has(symbol)) assetClass = 'crypto';
-  else if (KNOWN_STOCKS.has(symbol) || looksLikeUsEquityTicker(symbol)) assetClass = 'stock';
+  else if (KNOWN_STOCKS.has(symbol)) assetClass = 'stock';
 
-  return { symbol, assetClass, error: null, input };
+  return {
+    symbol,
+    assetClass,
+    equityHint: looksLikeUsEquityTicker(symbol),
+    error: null,
+    input
+  };
 }
 
 export function readRecentTickers(storage) {

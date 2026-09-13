@@ -26,7 +26,8 @@ test('UI ticker normalize matches ETH / SOL / AAPL entry', () => {
   assert.strictEqual(normalizeTickerInput('eth').symbol, 'ETH');
   assert.strictEqual(normalizeTickerInput('SOL').assetClass, 'crypto');
   assert.strictEqual(normalizeTickerInput('AAPL').assetClass, 'stock');
-  assert.strictEqual(normalizeTickerInput('CDNS').assetClass, 'stock');
+  assert.strictEqual(normalizeTickerInput('CDNS').assetClass, 'unknown');
+  assert.strictEqual(normalizeTickerInput('HYPE').assetClass, 'unknown');
   assert.strictEqual(normalizeTickerInput('ETH-USDT-SWAP').symbol, 'ETH');
 });
 
@@ -75,6 +76,8 @@ test('Overview HTML uses ticker text field instead of a symbol combo box', () =>
   assert.match(html, /id="ticker-input"/);
   assert.match(html, /id="ticker-add-btn"/);
   assert.match(html, /id="ticker-recent"/);
+  assert.match(html, /id="ticker-class-select"/);
+  assert.match(html, /id="ticker-class-picker"/);
   assert.doesNotMatch(html, /<select id="symbol-select">/);
   assert.match(html, /id="symbol-select"/);
 });
@@ -85,5 +88,7 @@ test('controller wires ticker Add\/Load and refresh-by-symbol', () => {
   assert.match(src, /addAndLoadTicker/);
   assert.match(src, /\/api\/refresh\?/);
   assert.match(src, /params\.set\('symbol'/);
+  assert.match(src, /assetClass/);
+  assert.match(src, /ticker-class-select/);
   assert.match(src, /setSelectedSymbol/);
 });

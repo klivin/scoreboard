@@ -26,7 +26,7 @@ Scoreboard is a crypto market analysis and forecasting dashboard built with vani
 - `signals/` - Extensible signal engine (EMA, MACD, RSI recovery, Ichimoku) + consensus
 - `backtest.js` - Walk-forward backtest vs buy-and-hold and naive baseline
 - `ingest.js` - Pack-file parsers (CSV/JSON on disk). No network.
-- `okx-adapter.js` / `fallback-adapters.js` / `stock-adapter.js` / `ticker.js` / `refresh.js` - Incremental ingest (OKX any crypto ticker; Yahoo Finance public equity candles; ETF/CG fallback)
+- `okx-adapter.js` / `crypto-adapter.js` / `resolve.js` / `fallback-adapters.js` / `stock-adapter.js` / `ticker.js` / `refresh.js` - Incremental ingest (crypto-first resolve; OKX → CoinGecko → Binance; Yahoo/Stooq equity)
 - `store.js` - Local JSON storage (forecasts, errors, universe, ingest_watermarks, ingest_series)
 - `store-adapter.js` - Abstraction layer for local/Firestore backends
 
@@ -149,24 +149,41 @@ Chat tap-to-load (`AppController.loadAsset` / `public/js/load-asset.js`) writes 
 ```
 type/add ticker
   → normalizeTicker (uppercase, strip $, BTCUSDT / BTC-USDT-SWAP → BTC)
-  → classify: known crypto | well-formed US ticker (equity) | pair-suffix crypto | unknown (try OKX)
-  → POST /api/refresh?symbol=SYM   // creates adapters if needed; 1h + 1d
+  → local classify: known crypto | known stock/ETF | pair-suffix crypto | unknown
+  → GET /api/resolve?symbol=  (crypto first: OKX / CoinGecko / Binance; Yahoo only if needed)
+  → if both coin and equity exist → venue picker (crypto · coin vs ETF vs equity)
+  → POST /api/refresh?symbol=SYM&assetClass=   // 1h + 1d
   → upsert ingest_series + ingest_watermarks (source, symbol, interval)
   → GET /api/indicators?symbol=SYM&interval=
   → ChartView (same overlays; missing ETF/OI stay missing)
+  → refresh status names the source that filled (OKX / CoinGecko / Binance / Yahoo / Stooq)
 ```
+
+Unknown 1–5 letter tickers (HYPE, CDNS, …) are **not** defaulted to Yahoo equity. Overview probes crypto venues first. If OKX or CoinGecko lists the ticker (HYPE → `HYPE-USDT` / `hyperliquid`), it loads as `crypto · coin`. If Yahoo also has bars for the same letters, the venue picker appears — same coin vs ETF/equity idea as Watch / Track.
+
+**Crypto candle fallbacks** (free, no keys, incremental watermarks):
+
+| Order | Source | Notes |
+|---|---|---|
+| 1 | OKX `history-candles` | `{SYM}-USDT-SWAP` then `{SYM}-USDT` spot |
+| 2 | CoinGecko `/coins/{id}/ohlc` | true OHLC; `market_chart` is close-only (open/high/low stay missing) |
+| 3 | Binance public `/api/v3/klines` | `{SYM}USDT` when listed |
+
+**Equity fallbacks** when the class is equity/ETF: Yahoo v8 chart → Yahoo crumb+cookie retry → Stooq daily CSV with a browser-like User-Agent. After every public source fails, the UI says missing. Prices are not invented.
 
 **Normalize** (`src/model/ticker.js`, mirrored in `public/js/ticker.js`):
 
-| Input | Symbol | Class | OKX instIds tried |
+| Input | Symbol | Local class | What happens |
 |---|---|---|---|
-| `eth` / `ETH` | ETH | crypto | `ETH-USDT-SWAP`, then `ETH-USDT` |
-| `SOL-USDT` | SOL | crypto | spot first (hint), then swap already recorded |
+| `eth` / `ETH` | ETH | crypto | OKX `ETH-USDT-SWAP`, then `ETH-USDT` |
+| `SOL-USDT` | SOL | crypto | spot first (hint), then swap |
 | `BTCUSDT` | BTC | crypto | `BTC-USDT-SWAP`, `BTC-USDT` |
-| `AAPL` / `AAPL.US` / `CDNS` | AAPL / CDNS | stock | none — Yahoo equity adapter |
+| `HYPE` | HYPE | unknown | crypto-first probe: OKX `HYPE-USDT` / CoinGecko `hyperliquid` → `crypto · coin` |
+| `AAPL` / `IBIT` | AAPL / IBIT | stock / ETF | Yahoo path (known list) |
+| `CDNS` | CDNS | unknown + equity hint | probe crypto (miss) then Yahoo → equity |
 | empty / junk | `''` | — | error, no fetch |
 
-Well-formed US tickers (1–5 letters, not a crypto hint) **use the equity ingest path** even if they are not in the research catalog. Catalog names are hints/tags only. Crypto pair suffixes still attempt OKX. If Yahoo/Stooq return no bars, the chart says missing — we do not invent a series.
+Known stocks (AAPL, IBIT, …) stay on the Yahoo path. Unknown 1–5 letter names are **not** treated as equities until crypto venues miss (or the user picks equity). Catalog names are hints/tags only. If every public source returns no bars, the chart says missing — we do not invent a series.
 
 **Cache / increment**
 
@@ -194,7 +211,7 @@ Well-formed US tickers (1–5 letters, not a crypto hint) **use the equity inges
 - Optional recent chips (`localStorage` `scoreboard.recentTickers`, max 8)
 - Hidden `#symbol-select` stays in sync so Universe row-click, Forecasts jump, and Chat tap-to-load still set the Overview ticker
 
-**Files:** `src/model/ticker.js`, `src/model/stock-adapter.js`, `src/model/okx-adapter.js` (per-symbol instId), `src/model/refresh.js` (`adaptersForTicker` / `ensureSymbolAdapters`), `src/model/series.js` (symbol-filtered candles + `mergeDailyPreferLive`), `public/js/ticker.js`, `public/js/controller.js`, `public/js/load-asset.js`
+**Files:** `src/model/ticker.js`, `src/model/resolve.js`, `src/model/crypto-adapter.js`, `src/model/stock-adapter.js`, `src/model/okx-adapter.js` (per-symbol instId), `src/model/refresh.js` (`adaptersForTicker` / `ensureSymbolAdapters`), `src/model/series.js` (symbol-filtered candles + `mergeDailyPreferLive`), `public/js/ticker.js`, `public/js/controller.js`, `public/js/load-asset.js`
 
 ### Source Priority (pack seed)
 
@@ -825,6 +842,7 @@ GET /api/indicators?symbol=BTC&interval=1d
 POST /api/refresh
 POST /api/refresh?source=okx-candles&symbol=BTC&interval=1h
 GET  /api/refresh/status
+GET  /api/resolve?symbol=HYPE
 ```
 
 Polling status (not SSE). `POST` is synchronous and returns the same per-source payload as status, including `requestedSince` / `requestUrls` so a second OKX refresh can be shown to request only the delta.
@@ -1145,6 +1163,14 @@ scoreboard.investments
 
 ## Changelog
 
+### Crypto-first ticker resolve (HYPE)
+- Unknown tickers (HYPE, CDNS, …) are not defaulted to Yahoo equity
+- Overview probes OKX / CoinGecko / Binance first; Hyperliquid `HYPE` loads as `crypto · coin`
+- If the same letters exist as coin and equity, a venue picker appears (Watch-style class)
+- Candle fallbacks: OKX → CoinGecko OHLC → Binance public. Equity: Yahoo crumb + Stooq browser UA
+- Refresh status and Watch Price show which source filled
+- Status: **doing** in code + `npm test`
+
 ### Watch / Track remaining cost basis + editable fills
 - Parent Entry is remaining lot cost (FIFO leftover average), not a frozen start-mark, after Bought/Sold or E*TRADE import
 - % and unrealized vs live Price use that remaining basis
@@ -1277,6 +1303,6 @@ scoreboard.investments
 
 ---
 
-**Last Updated:** 2026-09-11  
-**Version:** v1.10 (dynamic US equity resolve + Yahoo stock adapter + Chat web_search)  
+**Last Updated:** 2026-09-13  
+**Version:** v1.11 (crypto-first unknown tickers + HYPE / OKX-CG-Binance + source used)  
 **Status:** Not Pooli. No keys client-side. No trades. Research chat (no NFA chrome). Import stays in-browser.

@@ -149,6 +149,8 @@ test('refresh upserts once and second run requests only the overlap-adjusted del
   const first = await runtime.runRefresh({ source: 'okx-candles', symbol: 'BTC', interval: '1h' });
   assert.strictEqual(first.ran[0].status, 'ok');
   assert.strictEqual(first.ran[0].rowCount, 3);
+  assert.strictEqual(typeof first.ran[0].lastSuccessAgeMs, 'number');
+  assert.ok(first.ran[0].lastSuccessAgeMs >= 0);
   assert.ok(!calls[0].includes('before='), `first request should be full recent page, got ${calls[0]}`);
 
   const watermark = first.sources[0].lastTimestamp;
@@ -484,14 +486,16 @@ test('adaptersForTicker builds OKX 1h+1d for SOL and stock-public for AAPL/CDNS'
   const aapl = adaptersForTicker('AAPL');
   assert.ok(aapl.every((a) => a.id === 'stock-public'));
   assert.deepStrictEqual(aapl.map((a) => a.interval).sort(), ['1d', '1h']);
-  const cdns = adaptersForTicker('CDNS');
-  assert.ok(cdns.every((a) => a.id === 'stock-public' && a.symbol === 'CDNS' && a.mode === 'incremental'));
-  assert.deepStrictEqual(cdns.map((a) => a.interval).sort(), ['1d', '1h']);
+  const cdnsForced = adaptersForTicker('CDNS', { assetClass: 'equity' });
+  assert.ok(cdnsForced.every((a) => a.id === 'stock-public' && a.symbol === 'CDNS' && a.mode === 'incremental'));
+  const hype = adaptersForTicker('HYPE');
+  assert.ok(hype.every((a) => a.id === 'crypto-candles' && a.symbol === 'HYPE'));
+  assert.deepStrictEqual(hype.map((a) => a.interval).sort(), ['1d', '1h']);
   const ibit = adaptersForTicker('IBIT');
   assert.ok(ibit.every((a) => a.id === 'stock-public' && a.symbol === 'IBIT'));
   const btcEtf = adaptersForTicker('BTC', { assetClass: 'etf' });
   assert.ok(btcEtf.every((a) => a.id === 'stock-public'));
   const btcCoin = adaptersForTicker('BTC', { assetClass: 'crypto' });
-  assert.ok(btcCoin.some((a) => a.id === 'okx-candles'));
+  assert.ok(btcCoin.some((a) => a.id === 'okx-candles' || a.id === 'crypto-candles'));
   assert.ok(!btcCoin.some((a) => a.id === 'stock-public'));
 });
