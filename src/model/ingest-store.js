@@ -1,5 +1,5 @@
 import { firstRowTimestamp } from './dates.js';
-import { seriesRowId, upsertByNaturalKey } from './source-adapter.js';
+import { isLiveCandleSource, seriesRowId, upsertByNaturalKey } from './source-adapter.js';
 
 export function toStoreRows(rows, { source, symbol, interval }) {
   return (rows || []).map((row) => {
@@ -94,7 +94,7 @@ export function applySeriesStoreToPack(pack, seriesItems) {
   const items = seriesItems || [];
 
   pack.live_candles = items.filter((row) => (
-    row && (row.source === 'okx-candles' || row.source === 'stock-public')
+    row && isLiveCandleSource(row.source)
   ));
 
   const candles1h = items.filter((row) => (

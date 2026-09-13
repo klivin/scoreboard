@@ -51,7 +51,7 @@ export async function loadAssetOnApp(app, payload, documentRef) {
   const doc = documentRef || (typeof document !== 'undefined' ? document : null);
 
   if (app && typeof app.setSelectedSymbol === 'function') {
-    app.setSelectedSymbol(load.symbol);
+    app.setSelectedSymbol(load.symbol, { assetClass: load.assetClass });
   } else if (doc) {
     applyLoadAssetToDom(load, doc);
   }

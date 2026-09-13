@@ -259,6 +259,26 @@ npm start
 
 ## Data Features
 
+### HYPE / unknown tickers: crypto-first resolve (not Yahoo equity)
+**Status:** doing  
+**Request:** Kevin typed **HYPE** in Overview. It hit the stock adapter and failed (Yahoo “delisted”; Stooq challenge/HTML). HYPE is Hyperliquid crypto (OKX spot `HYPE-USDT`, CoinGecko id `hyperliquid`). Do not default unknown 1–5 letter tickers to Yahoo equity.
+
+**Must ship:**
+1. Resolve crypto first (OKX instruments / CoinGecko search / Binance public). If listed, load as `crypto · coin`. If the same ticker is also an ETF/equity, show a venue picker (Overview + Watch pattern).
+2. Crypto candles: OKX spot/swap → CoinGecko `ohlc` / `market_chart` (close-only; no invented OHLC) → Binance public klines. Incremental watermarks. Last bar near today for HYPE 1h+1d when the source is up.
+3. Equity fallbacks when Yahoo/Stooq fail: Yahoo v8 crumb + cookie, Stooq with browser-like UA. Honest empty after all tries. Never invent OHLC.
+4. Show which source filled (OKX vs CoinGecko vs Binance vs Yahoo vs Stooq) on Overview refresh status and Watch Price when present.
+
+**Verification:**
+- `npm test` — HYPE/crypto-first classify; mocked fallback chain; source-used reporting; live OKX HYPE when network allows
+- Type HYPE → 1h+1d series, last bar near today, status says OKX (or CG/Binance if OKX is down)
+
+**Design:** `docs/WIKI.md` (Arbitrary tickers — crypto-first resolve)
+
+**Priority:** High
+
+---
+
 ### Ticker text field (any crypto / stock)
 **Status:** doing  
 **Request:** Replace the Overview asset combo box with a ticker text field. User types/adds any crypto or stock (`ETH`, `SOL`, `AAPL`, …), then Load Data fetches daily + hourly and charts them on the same Lightweight Charts path as BTC/ETH. Cache each asset. A later pull fetches only the latest increment (OKX watermark + overlap), not a full re-download.
@@ -1003,6 +1023,6 @@ Save as `synthetic-etrade-activity.csv`, `npm start`, Investments tab → choose
 
 ---
 
-**Last Updated:** 2026-09-11 (CDNS dynamic equity + Yahoo adapter + Chat tool order)  
+**Last Updated:** 2026-09-13 (HYPE crypto-first resolve + OKX/CG/Binance fallbacks + source used)  
 **Maintainer:** Kevin (reviewer), updated by Scoreboard team  
 **Status Tracking:** This file updated as features ship

@@ -2,9 +2,9 @@ import { seriesModel } from '../series.js';
 import { getRefreshRuntime } from '../refresh.js';
 import {
   classifyAssetClass,
-  looksLikeUsEquityTicker,
   normalizeTicker
 } from '../ticker.js';
+import { resolveTicker } from '../resolve.js';
 import {
   defaultCatalog,
   lookupAsset,
@@ -190,7 +190,7 @@ export function resolveOne(query, catalog = defaultCatalog()) {
         }
       };
     }
-    if (classified === 'stock' || looksLikeUsEquityTicker(parsed.symbol)) {
+    if (classified === 'stock') {
       const asset = dynamicEquityAsset(parsed.symbol, q);
       return {
         ok: true,
@@ -207,6 +207,26 @@ export function resolveOne(query, catalog = defaultCatalog()) {
           symbol: asset.symbol,
           assetClass: 'equity',
           intervalHint: intervalHintFor(asset, q)
+        }
+      };
+    }
+    if (classified === 'unknown' && parsed.symbol && (parsed.equityHint || parsed.marketHint)) {
+      return {
+        ok: true,
+        query: q,
+        symbol: parsed.symbol,
+        name: parsed.symbol,
+        assetClass: 'unknown',
+        venue: null,
+        scoreboardId: `unknown:${parsed.symbol}`,
+        blurb: `${parsed.symbol} is not in the catalog. Overview probes crypto (OKX/CoinGecko/Binance) before Yahoo equity.`,
+        strategyConsiderations: ['Load Data resolves coin vs equity; prices are not invented.'],
+        catalogHint: false,
+        needsResolve: true,
+        load: {
+          symbol: parsed.symbol,
+          assetClass: 'unknown',
+          intervalHint: intervalHintFor({ symbol: parsed.symbol }, q)
         }
       };
     }
@@ -228,6 +248,63 @@ export function resolveOne(query, catalog = defaultCatalog()) {
 export function resolveAssets(queries, catalog = defaultCatalog()) {
   const list = Array.isArray(queries) ? queries : [];
   return list.map((query) => resolveOne(query, catalog));
+}
+
+export async function resolveAssetsAsync(queries, catalog = defaultCatalog(), { httpGet, resolveTicker: resolveFn = resolveTicker } = {}) {
+  const list = Array.isArray(queries) ? queries : [];
+  const out = [];
+  for (const query of list) {
+    const sync = resolveOne(query, catalog);
+    if (sync.ok && !sync.needsResolve) {
+      out.push(sync);
+      continue;
+    }
+    if (!sync.symbol && !sync.ok) {
+      out.push(sync);
+      continue;
+    }
+    const resolved = await resolveFn(sync.symbol || query, { httpGet });
+    if (!resolved || !resolved.ok || !resolved.symbol) {
+      out.push(sync.ok ? sync : {
+        ok: false,
+        query,
+        symbol: null,
+        load: null,
+        reason: (resolved && resolved.error) || 'could not resolve ticker'
+      });
+      continue;
+    }
+    const asset = resolved.assetClass === 'crypto'
+      ? dynamicCryptoAsset(resolved.symbol, query)
+      : dynamicEquityAsset(resolved.symbol, query);
+    if (resolved.assetClass === 'crypto') {
+      asset.venue = resolved.crypto && resolved.crypto.source || 'okx';
+      asset.blurb = `${resolved.symbol} crypto · coin (${asset.venue}). Resolved crypto-first — not defaulted to Yahoo equity.`;
+    } else {
+      asset.assetClass = resolved.assetClass === 'etf' ? 'etf' : 'equity';
+      asset.scoreboardId = `${asset.assetClass}:${resolved.symbol}`;
+    }
+    out.push({
+      ok: true,
+      query,
+      symbol: resolved.symbol,
+      name: asset.name,
+      assetClass: asset.assetClass,
+      venue: asset.venue,
+      scoreboardId: asset.scoreboardId,
+      blurb: asset.blurb,
+      strategyConsiderations: asset.strategyConsiderations,
+      catalogHint: false,
+      needsPicker: Boolean(resolved.needsPicker),
+      candidates: resolved.candidates || [],
+      load: {
+        symbol: resolved.symbol,
+        assetClass: asset.assetClass,
+        intervalHint: intervalHintFor(asset, query)
+      }
+    });
+  }
+  return out;
 }
 
 function toHit(asset) {
@@ -381,7 +458,7 @@ export function createToolRunner({
     definitions: TOOL_DEFINITIONS,
     execute(name, args = {}) {
       if (name === 'resolve_assets') {
-        return { results: resolveAssets(args.queries || [], cat) };
+        return resolveAssetsAsync(args.queries || [], cat).then((results) => ({ results }));
       }
       if (name === 'search_assets') {
         return searchAssets(args.naturalQuery || '', cat);

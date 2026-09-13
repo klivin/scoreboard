@@ -10,6 +10,7 @@ import {
 import { applySeriesStoreToPack, overlayByTimestamp } from './ingest-store.js';
 import { ingestSeriesStore, ingestWatermarkStore, universeStore } from './store-adapter.js';
 import { normalizeTicker } from './ticker.js';
+import { isLiveCandleSource } from './source-adapter.js';
 
 export function isBtcSymbol(symbol) {
   const upper = String(symbol || '').toUpperCase();
@@ -89,16 +90,16 @@ export function filterRowsBySymbol(rows, symbol) {
 export function missingSeriesMessage(symbol, interval, extra = {}) {
   const intervalNorm = interval === '1h' ? '1h' : '1d';
   const sym = String(symbol || '').toUpperCase();
-  if (extra.assetClass === 'stock' || extra.needsStockAdapter) {
-    return `No data available for ${sym} ${intervalNorm}. Public equity source (Yahoo Finance chart API; Stooq daily fallback) returned no candles. Prices are not invented.`;
+  if (extra.assetClass === 'stock' || extra.assetClass === 'equity' || extra.assetClass === 'etf' || extra.needsStockAdapter) {
+    return `No data available for ${sym} ${intervalNorm}. Public equity source (Yahoo Finance chart API with crumb; Stooq daily fallback) returned no candles. Prices are not invented.`;
   }
   if (intervalNorm === '1h' && !isBtcSymbol(sym)) {
-    return `No 1h series for ${sym}. Load Data fetches OKX public ${sym}-USDT-SWAP (or spot) candles incrementally. The Flow pack only includes hourly OKX BTC (okx_btc_usdt_swap_candles_1h.csv). Alt 1h is not interpolated from daily. Missing readings are not plotted as 0.`;
+    return `No 1h series for ${sym}. Load Data fetches OKX public ${sym}-USDT-SWAP (or spot), then CoinGecko OHLC, then Binance public klines. The Flow pack only includes hourly OKX BTC (okx_btc_usdt_swap_candles_1h.csv). Alt 1h is not interpolated from daily. Missing readings are not plotted as 0.`;
   }
   if (intervalNorm === '1h' && isBtcSymbol(sym)) {
     return `No 1h series for BTC. Place okx_btc_usdt_swap_candles_1h.csv in /workspace/scoreboard/ or ./data/.`;
   }
-  return `No data available for ${sym} ${intervalNorm}. Crypto Load Data uses OKX public ${sym}-USDT-SWAP or ${sym}-USDT candles. Equities use Yahoo Finance public chart API (Stooq daily fallback). Prices are not invented.`;
+  return `No data available for ${sym} ${intervalNorm}. Crypto Load Data tries OKX ${sym}-USDT-SWAP / ${sym}-USDT, then CoinGecko OHLC, then Binance public klines. Equities use Yahoo Finance public chart API (crumb + Stooq daily fallback). Unknown tickers are not defaulted to Yahoo equity. Prices are not invented.`;
 }
 
 export function mapIndicatorRow(row) {
@@ -304,7 +305,7 @@ export class SeriesModel {
     const live = (this.data.live_candles || [])
       .filter((row) => (
         row
-        && (row.source == null || row.source === 'okx-candles' || row.source === 'stock-public')
+        && (row.source == null || isLiveCandleSource(row.source))
         && String(row.symbol || '').toUpperCase() === upper
         && (row.interval == null || row.interval === intervalNorm)
       ))

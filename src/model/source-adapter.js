@@ -1,5 +1,41 @@
 export const OVERLAP_BARS = 3;
 
+export const LIVE_CANDLE_SOURCES = new Set([
+  'okx-candles',
+  'stock-public',
+  'crypto-candles',
+  'coingecko-ohlc',
+  'binance-klines'
+]);
+
+export function isLiveCandleSource(source) {
+  if (source == null || source === '') return true;
+  return LIVE_CANDLE_SOURCES.has(source);
+}
+
+export function sourceLabel(source, filledSource = null) {
+  const key = String(filledSource || source || '').toLowerCase();
+  if (key === 'okx' || key === 'okx-candles') return 'OKX';
+  if (key === 'coingecko' || key === 'coingecko-ohlc' || key === 'coingecko-top100') return 'CoinGecko';
+  if (key === 'binance' || key === 'binance-klines') return 'Binance';
+  if (key === 'yahoo' || key === 'yahoo-chart') return 'Yahoo';
+  if (key === 'stooq') return 'Stooq';
+  if (key === 'stock-public') return filledSource ? sourceLabel(filledSource) : 'Yahoo';
+  if (key === 'crypto-candles') return filledSource ? sourceLabel(filledSource) : 'OKX';
+  if (key === 'etf-farside') return 'Farside';
+  return source || 'unknown';
+}
+
+export function venueLabel(assetClass, filledSource = null) {
+  const cls = String(assetClass || '').toLowerCase();
+  if (cls === 'crypto' || cls === 'coin') return 'crypto · coin';
+  if (cls === 'etf') return 'ETF';
+  if (cls === 'equity' || cls === 'stock') return 'equity';
+  if (filledSource && /okx|coingecko|binance/.test(String(filledSource))) return 'crypto · coin';
+  if (filledSource && /yahoo|stooq/.test(String(filledSource))) return 'equity';
+  return 'unknown';
+}
+
 export const INTERVAL_MS = {
   '1h': 3600000,
   '1d': 86400000

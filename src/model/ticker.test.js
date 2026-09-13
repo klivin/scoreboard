@@ -23,8 +23,19 @@ test('normalizeTicker classifies known crypto vs stock', () => {
   assert.strictEqual(normalizeTicker('SOL').assetClass, 'crypto');
   assert.strictEqual(normalizeTicker('AAPL').assetClass, 'stock');
   assert.strictEqual(normalizeTicker('MSFT').assetClass, 'stock');
-  assert.strictEqual(normalizeTicker('CDNS').assetClass, 'stock');
+  assert.strictEqual(normalizeTicker('CDNS').assetClass, 'unknown');
+  assert.strictEqual(normalizeTicker('CDNS').equityHint, true);
+  assert.strictEqual(normalizeTicker('HYPE').assetClass, 'unknown');
+  assert.strictEqual(normalizeTicker('HYPE').equityHint, true);
   assert.strictEqual(normalizeTicker('ZZZ9').assetClass, 'unknown');
+});
+
+test('HYPE is not defaulted to Yahoo equity and still has OKX instIds', () => {
+  const hype = normalizeTicker('HYPE');
+  assert.strictEqual(hype.assetClass, 'unknown');
+  assert.strictEqual(hype.instIdSpot, 'HYPE-USDT');
+  assert.strictEqual(hype.instIdSwap, 'HYPE-USDT-SWAP');
+  assert.deepStrictEqual(instIdCandidates(hype).map((row) => row.instId), ['HYPE-USDT-SWAP', 'HYPE-USDT']);
 });
 
 test('normalizeTicker rejects empty / junk', () => {

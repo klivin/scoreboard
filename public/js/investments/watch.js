@@ -395,6 +395,7 @@ export function buildWatchRow(record, {
     costBasis: costBasis ?? (lot.hasLot ? lot.costBasis : (real ? real.costBasis : null)),
     mark,
     markAsOf: meta && (meta.dateUtc || meta.asOf) || null,
+    markSource: meta && (meta.sourceLabel || meta.source) || null,
     markAsOfTs: meta && meta.timestamp ? meta.timestamp : null,
     returnPct: vsLive.unrealizedPct != null ? vsLive.unrealizedPct : returnPct,
     unrealizedPnl: vsLive.unrealizedPnl,

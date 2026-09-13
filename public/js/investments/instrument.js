@@ -6,12 +6,12 @@
 
 export const INSTRUMENT_CLASSES = Object.freeze(['crypto', 'etf', 'equity']);
 
-/** Spot / perp coins Scoreboard can ingest via OKX. */
+/** Spot / perp coins Scoreboard can ingest via OKX. HYPE is Hyperliquid — resolved dynamically too. */
 export const OKX_CRYPTO_SYMBOLS = new Set([
   'AVAX', 'BNB', 'BTC', 'DOGE', 'ETH', 'LINK', 'PEPE', 'SHIB', 'SOL', 'SUI', 'TRUMP', 'XRP',
   'ADA', 'DOT', 'MATIC', 'POL', 'ATOM', 'NEAR', 'APT', 'ARB', 'OP', 'LTC', 'BCH',
   'UNI', 'AAVE', 'FIL', 'ICP', 'ETC', 'HBAR', 'ALGO', 'VET', 'MKR', 'INJ', 'SEI',
-  'TIA', 'TON', 'OKB', 'SKR', 'LEO', 'KCS'
+  'TIA', 'TON', 'OKB', 'SKR', 'LEO', 'KCS', 'HYPE'
 ]);
 
 /** Coin names that are also used loosely for ETFs — never assume spot. */

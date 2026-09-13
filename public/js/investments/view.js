@@ -80,7 +80,8 @@ function priceCell(row) {
     return `<span class="inv-muted">missing</span>`;
   }
   const asOf = row.markAsOf ? `<div class="inv-asof">as of ${escapeHtml(row.markAsOf)}</div>` : '';
-  return `<div>${money(row.mark)}</div>${asOf}`;
+  const source = row.markSource ? `<div class="inv-asof">${escapeHtml(row.markSource)}</div>` : '';
+  return `<div>${money(row.mark)}</div>${asOf}${source}`;
 }
 
 function venuePicker(row) {

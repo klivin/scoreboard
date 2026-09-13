@@ -134,6 +134,32 @@ h1 {
 .refresh-status .src-error { color: #9f1239; }
 .refresh-status .src-running { color: #1d4ed8; }
 .refresh-status .src-fallback { color: #92400e; }
+.refresh-status .ticker-source-used { margin: 0 0 8px; }
+.refresh-status em { font-style: normal; font-weight: 600; }
+
+.ticker-venue {
+  margin: 0 0 10px;
+  font-size: 0.92rem;
+  color: #334155;
+}
+.ticker-venue.hidden { display: none; }
+
+.ticker-class-picker {
+  margin: 0 0 12px;
+  padding: 10px 12px;
+  background: #fff7ed;
+  border: 1px solid #fdba74;
+  border-radius: 6px;
+}
+.ticker-class-picker.hidden { display: none; }
+.ticker-class-buttons { display: flex; gap: 8px; flex-wrap: wrap; }
+.ticker-class-btn {
+  padding: 6px 10px;
+  border: 1px solid #c2410c;
+  background: #fff;
+  border-radius: 6px;
+  cursor: pointer;
+}
 
 .controls input[type="text"] {
   padding: 8px 12px;

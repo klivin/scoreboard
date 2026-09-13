@@ -3,6 +3,7 @@ import { generateForecast, createForecastCard, generatePredictedSeries } from '.
 import { daysToHorizon, horizonToDays } from '../model/forecast-schema.js';
 import { createAndStoreForecast, ensureForecastHistory, forecastsToCsv } from '../model/forecast-history.js';
 import { getRefreshRuntime } from '../model/refresh.js';
+import { resolveTicker } from '../model/resolve.js';
 import {
   evaluateWalkForward,
   evaluateAll,
@@ -341,6 +342,18 @@ function refreshFilterFromReq(req) {
     interval: query.interval || body.interval || undefined,
     assetClass: query.assetClass || body.assetClass || undefined
   };
+}
+
+export async function handleGetResolve(req, res) {
+  try {
+    const symbol = req.query.symbol || req.query.ticker || '';
+    const result = await resolveTicker(symbol, {
+      assetClass: req.query.assetClass
+    });
+    res.json(result);
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
 }
 
 export async function handlePostRefresh(req, res) {
