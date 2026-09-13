@@ -149,6 +149,8 @@ test('refresh upserts once and second run requests only the overlap-adjusted del
   const first = await runtime.runRefresh({ source: 'okx-candles', symbol: 'BTC', interval: '1h' });
   assert.strictEqual(first.ran[0].status, 'ok');
   assert.strictEqual(first.ran[0].rowCount, 3);
+  assert.strictEqual(typeof first.ran[0].lastSuccessAgeMs, 'number');
+  assert.ok(first.ran[0].lastSuccessAgeMs >= 0);
   assert.ok(!calls[0].includes('before='), `first request should be full recent page, got ${calls[0]}`);
 
   const watermark = first.sources[0].lastTimestamp;

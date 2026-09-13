@@ -205,6 +205,8 @@ test('refresh reports filledSource from the crypto fallback chain', async () => 
   assert.strictEqual(daily.status, 'ok');
   assert.strictEqual(daily.filledSource, 'okx');
   assert.strictEqual(daily.sourceLabel, 'OKX');
+  assert.strictEqual(typeof daily.lastSuccessAgeMs, 'number');
+  assert.ok(daily.lastSuccessAgeMs >= 0);
   assert.strictEqual(result.filledSource, 'okx');
   assert.strictEqual(result.resolve.assetClass, 'crypto');
   assert.match(sourceLabel('crypto-candles', 'okx'), /OKX/);

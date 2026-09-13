@@ -367,9 +367,13 @@ export function createRefreshRuntime({
       state.lastRunAt = now();
       hydrateFromWatermarks(state.lastRunAt);
       const filled = results.find((row) => row && row.filledSource && row.status === 'ok');
+      const nowTs = now();
       return {
         ...getStatus(),
-        ran: results,
+        ran: results.map((row) => ({
+          ...row,
+          lastSuccessAgeMs: ageMs(row.lastSuccessAt, nowTs)
+        })),
         resolve: resolved,
         needsPicker: Boolean(resolved && resolved.needsPicker),
         filledSource: filled && filled.filledSource || null,
